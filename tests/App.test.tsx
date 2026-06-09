@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
-import type { WorkspaceDocument } from "../src/shared";
+import type { SpaceApi, WorkspaceDocument } from "../src/shared";
 
 function readSavedWorkspace(): WorkspaceDocument | null {
   const raw = window.localStorage.getItem("space.mock.workspace");
@@ -62,6 +62,49 @@ function writeLegacyActionWorkspace(): void {
 }
 
 describe("App", () => {
+  it("shows a recoverable startup error when the desktop API fails", async () => {
+    window.spaceAPI = {
+      bootstrap: vi.fn().mockRejectedValue(new Error("bootstrap unavailable"))
+    } as unknown as SpaceApi;
+
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Space could not start");
+    expect(alert).toHaveTextContent("bootstrap unavailable");
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("falls back to a usable default workspace when saved workspace data is malformed", async () => {
+    window.localStorage.setItem(
+      "space.mock.workspace",
+      JSON.stringify({
+        activeWorkspaceId: "broken",
+        workspaces: [
+          {
+            id: "broken",
+            name: "",
+            layout: "diagonal",
+            activePaneId: 42,
+            panes: null,
+            bookmarks: [],
+            savedAt: 1
+          }
+        ],
+        savedAt: 1
+      })
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Four-pane file manager")).toBeInTheDocument());
+    expect(screen.getByLabelText("Pane 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pane 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pane 4")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("C:\\Users\\Traveler")).toHaveLength(4);
+  });
+
   it("renders four explorer panes with default controls", async () => {
     render(<App />);
 

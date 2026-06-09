@@ -136,6 +136,8 @@ interface HashCompareResult {
 }
 
 const paneIds = [1, 2, 3, 4];
+const layoutModes: LayoutMode[] = ["grid", "columns", "rows", "focus"];
+const sortKeys: SortKey[] = ["name", "size", "modifiedAt", "type"];
 const sortLabels: Record<SortKey, string> = {
   name: "Name",
   size: "Size",
@@ -605,6 +607,32 @@ function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapsho
   };
 }
 
+function normalizePaneSnapshot(
+  snapshot: Partial<WorkspacePaneSnapshot> | undefined,
+  id: number,
+  bootstrap: BootstrapPayload
+): WorkspacePaneSnapshot {
+  const filePath = typeof snapshot?.path === "string" && snapshot.path.trim() ? snapshot.path : bootstrap.homePath;
+  const historyCandidates = Array.isArray(snapshot?.history)
+    ? snapshot.history.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const history = historyCandidates.length ? historyCandidates : [filePath];
+  const rawHistoryIndex = Number.isInteger(snapshot?.historyIndex) ? Number(snapshot?.historyIndex) : history.length - 1;
+  const historyIndex = Math.max(0, Math.min(rawHistoryIndex, history.length - 1));
+  const sortKey = sortKeys.includes(snapshot?.sortKey as SortKey) ? (snapshot?.sortKey as SortKey) : "name";
+  const sortDirection: SortDirection = snapshot?.sortDirection === "desc" ? "desc" : "asc";
+  const viewMode: ViewMode = snapshot?.viewMode === "icons" ? "icons" : "details";
+  return {
+    id,
+    path: filePath,
+    history,
+    historyIndex,
+    sortKey,
+    sortDirection,
+    viewMode
+  };
+}
+
 function hydratePane(snapshot: WorkspacePaneSnapshot): PaneState {
   return {
     ...snapshot,
@@ -675,13 +703,15 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
 
 function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapPayload): WorkspaceRecord {
   const migrateActionLayout = (record.actionLayoutVersion ?? 1) < currentActionLayoutVersion;
+  const savedPanes = Array.isArray(record.panes) ? record.panes : [];
+  const layout = layoutModes.includes(record.layout) ? record.layout : "grid";
   return {
     ...record,
     id: record.id || createWorkspaceId(),
     name: record.name || "Workspace",
-    layout: record.layout ?? "grid",
+    layout,
     activePaneId: paneIds.includes(record.activePaneId) ? record.activePaneId : 1,
-    panes: paneIds.map((id) => record.panes.find((pane) => pane.id === id) ?? defaultPaneSnapshot(id, bootstrap.homePath)),
+    panes: paneIds.map((id) => normalizePaneSnapshot(savedPanes.find((pane) => pane?.id === id), id, bootstrap)),
     bookmarks: record.bookmarks ?? [],
     stashItems: record.stashItems ?? [],
     fileTemplates: record.fileTemplates ?? [],
@@ -792,6 +822,7 @@ export default function App() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [startupError, setStartupError] = useState("");
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [hashLine, setHashLine] = useState<string>("");
   const [newFileOpen, setNewFileOpen] = useState(false);
@@ -818,6 +849,7 @@ export default function App() {
     let cancelled = false;
 
     async function boot() {
+      setStartupError("");
       try {
         const bootPayload = await api.bootstrap();
         const workspaceDocument = normalizeWorkspaceDocument(await api.getWorkspace(), bootPayload);
@@ -868,9 +900,10 @@ export default function App() {
         if (!cancelled) {
           setPanes(loaded);
           setInitialized(true);
+          setStartupError("");
         }
       } catch (error) {
-        if (!cancelled) showToast("error", `Startup failed: ${getErrorMessage(error)}`);
+        if (!cancelled) setStartupError(getErrorMessage(error));
       }
     }
 
@@ -1720,6 +1753,19 @@ export default function App() {
     if (!action || action.disabled) return false;
     action.onClick();
     return true;
+  }
+
+  if (startupError && (!bootstrap || panes.length !== 4)) {
+    return (
+      <main className="loading-screen startup-error" role="alert">
+        <LayoutGrid size={42} />
+        <strong>Space could not start</strong>
+        <span>{startupError}</span>
+        <button type="button" onClick={() => window.location.reload()}>
+          Retry
+        </button>
+      </main>
+    );
   }
 
   if (!bootstrap || panes.length !== 4) {

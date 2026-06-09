@@ -4,7 +4,7 @@
 
 | Area | Evidence |
 | --- | --- |
-| Windows desktop app launches | `npm run smoke:electron` verifies the packaged renderer reaches four visible panes |
+| Windows desktop app launches | `npm run smoke:electron` verifies the packaged renderer reaches four visible panes; `tests/App.test.tsx` covers visible startup failure instead of endless loading |
 | Four explorer panes render | `tests/App.test.tsx`; browser DOM verification |
 | Modern responsive layout | Browser screenshot at `http://127.0.0.1:5188/`; overflow checks |
 | Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot; path suggestion tests |
@@ -20,7 +20,7 @@
 | Hash Compare | `tests/App.test.tsx` selected-file hash comparison modal coverage; `tests/fileService.test.ts` hash calculation coverage |
 | Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage; `tests/App.test.tsx` preset save/load/delete and history record/clear coverage |
 | Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage; `tests/App.test.tsx` sync preset save/load/delete coverage |
-| Workspace tabs and persistence | `tests/App.test.tsx`; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
+| Workspace tabs and persistence | `tests/App.test.tsx` including malformed saved workspace recovery; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
 | Stash Shelf | `tests/App.test.tsx` shelf add/hash/clear coverage; manual copy/move shelf checks |
 | ZIP/TAR/TGZ archives | `tests/fileService.test.ts` ZIP create/list/preview/extract plus TAR/TGZ list/preview/extract and traversal-block coverage; `tests/App.test.tsx` archive browser coverage |
 | Type safety | `npm run typecheck` |
