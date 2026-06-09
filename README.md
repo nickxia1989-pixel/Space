@@ -29,6 +29,8 @@ npm start
 npm test
 npm run typecheck
 npm run build
+npm run package:win
+npm run dist:win
 npm run smoke:electron
 ```
 
@@ -36,12 +38,19 @@ npm run smoke:electron
 
 `npm run smoke:electron` builds the app, starts Electron with `SPACE_SMOKE_TEST=1`, verifies the production window can load, and exits automatically.
 
+`npm run package:win` creates an unpacked Windows x64 build under `release/win-unpacked`. Use it for fast packaging verification.
+
+`npm run dist:win` creates Windows x64 NSIS and portable distributables under `release/`:
+
+- `Space-0.1.0-x64-setup.exe`
+- `Space-0.1.0-x64-portable.exe`
+
 ## Project Structure
 
 - `electron/`: Electron main process, preload bridge, filesystem service, and workspace persistence.
 - `src/`: React app, shared contracts, renderer API adapter, path utilities, and styling.
 - `tests/`: Vitest coverage for path utilities, filesystem service behavior, and renderer smoke interactions.
-- `dist/` and `dist-electron/`: generated build output, ignored by Git.
+- `dist/`, `dist-electron/`, and `release/`: generated build/package output, ignored by Git.
 
 ## Known Scope Boundaries
 

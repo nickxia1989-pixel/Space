@@ -2,6 +2,7 @@
   "name": "space",
   "version": "0.1.0",
   "private": true,
+  "author": "Space",
   "description": "A modern four-pane Windows file manager inspired by QSpace.",
   "main": "dist-electron/electron/main.js",
   "type": "module",
@@ -11,15 +12,61 @@
     "dev:electron": "npm run build:electron && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build:electron": "tsc -p tsconfig.node.json",
     "build": "npm run build:electron && vite build",
+    "icon:generate": "node scripts/generate-icon.mjs",
     "start": "npm run build && electron .",
     "smoke:electron": "npm run build && cross-env SPACE_SMOKE_TEST=1 electron .",
+    "package:win": "npm run build && electron-builder --win dir --x64",
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
+  "build": {
+    "appId": "space.file.manager",
+    "productName": "Space",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "icon": "assets/icon.ico",
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Space"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+    }
+  },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "^39.2.7",
     "jszip": "^3.10.1",
     "lucide-react": "^0.555.0",
     "react": "^19.2.1",
@@ -34,7 +81,10 @@
     "@types/react-dom": "^19.2.3",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.2",
     "jsdom": "^27.2.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vitest": "^4.0.15",

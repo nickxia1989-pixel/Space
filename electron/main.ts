@@ -53,6 +53,7 @@ function createWindow(): void {
     minWidth: 1120,
     minHeight: 720,
     title: "Space",
+    icon: path.join(__dirname, "../../assets/icon.ico"),
     backgroundColor: "#101217",
     show: false,
     webPreferences: {

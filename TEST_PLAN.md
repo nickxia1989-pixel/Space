@@ -17,6 +17,7 @@
 | ZIP archives | `tests/fileService.test.ts` create/list/preview/extract coverage; `tests/App.test.tsx` archive browser coverage |
 | Type safety | `npm run typecheck` |
 | Production build | `npm run build` |
+| Windows package | `npm run package:win`; launch `release/win-unpacked/Space.exe`; `npm run dist:win` setup and portable output |
 
 ## Automated Checks
 
@@ -26,6 +27,8 @@ Run these before considering a build stable:
 npm run typecheck
 npm test
 npm run build
+npm run package:win
+npm run dist:win
 npm run smoke:electron
 ```
 
@@ -48,6 +51,8 @@ Expected result: all commands exit with code `0`.
 13. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
 14. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all.
 15. Restart the app and confirm workspace tabs, pane locations, layout, active pane, and bookmarks are restored.
+16. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
+17. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
 ## Browser Renderer Checks
 
