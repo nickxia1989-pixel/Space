@@ -380,6 +380,24 @@ describe("App", () => {
     promptSpy.mockRestore();
   });
 
+  it("selects the renamed item in the source pane", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed Notes.md");
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Space Notes.md"));
+    const shell = screen.getByText("Four-pane file manager").closest("main");
+    expect(shell).not.toBeNull();
+    fireEvent.keyDown(shell!, { key: "F2" });
+
+    expect(await screen.findByText("Rename complete.")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument());
+    expect(within(pane).getByText("Renamed Notes.md").closest("button")).toHaveClass("selected");
+    promptSpy.mockRestore();
+  });
+
   it("opens advanced batch rename and folder sync panels", async () => {
     const user = userEvent.setup();
     render(<App />);

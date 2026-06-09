@@ -1410,6 +1410,13 @@ export default function App() {
     updatePane(paneId, (pane) => ({ ...pane, selectedPaths: visibleEntries(pane).map((entry) => entry.path) }));
   }
 
+  function selectPathIfVisible(paneId: number, targetPath: string) {
+    updatePane(paneId, (pane) => {
+      const entry = pane.entries.find((item) => item.path.toLowerCase() === targetPath.toLowerCase());
+      return entry ? { ...pane, selectedPaths: [entry.path], anchorPath: entry.path } : pane;
+    });
+  }
+
   function openEntry(paneId: number, entry: FileEntry) {
     setPreviewPath(entry.path);
     if (entry.isDirectory) {
@@ -1547,6 +1554,7 @@ export default function App() {
     if (!name) return;
     const result = await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), refreshIds);
     if (result && result !== true && "path" in result) {
+      selectPathIfVisible(pane.id, result.path);
       await Promise.all(movedPathRecoveryTargets([{ sourcePath, targetPath: result.path }]).map((target) => loadPane(target.paneId, target.targetPath, "replace", false)));
     }
   }
