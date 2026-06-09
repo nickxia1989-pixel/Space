@@ -336,6 +336,9 @@ function createBrowserMockApi(): SpaceApi {
       const copied = request.sources.map((source) => {
         const sourceEntry = findMockEntry(source);
         if (!sourceEntry) throw new Error("Item not found.");
+        if (sourceEntry.isDirectory && mockIsSameOrChild(request.destination, sourceEntry.path)) {
+          throw new Error("Cannot copy a folder into itself.");
+        }
         const targetPath = mockUniqueTargetPath(mockJoin(request.destination, sourceEntry.name));
         const cloned = cloneMockEntryTree(sourceEntry, targetPath);
         addMockEntry(request.destination, cloned);

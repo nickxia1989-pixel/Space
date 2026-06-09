@@ -272,6 +272,10 @@ export async function copyItems(request: FileOperationRequest): Promise<Operatio
   const affectedPaths: string[] = [];
   for (const source of request.sources) {
     const sourcePath = normalizeInputPath(source);
+    const stats = await fsp.lstat(sourcePath);
+    if (stats.isDirectory() && isSameOrChild(destination, sourcePath)) {
+      throw new Error("Cannot copy a folder into itself.");
+    }
     const targetPath = await uniqueTargetPath(path.join(destination, path.basename(sourcePath)));
     await copyPath(sourcePath, targetPath);
     affectedPaths.push(targetPath);

@@ -92,6 +92,22 @@ describe("fileService", () => {
     expect(path.basename(secondCopy.affectedPaths![0])).toBe("report copy 2.txt");
   });
 
+  it("blocks copying a folder into itself or one of its children", async () => {
+    const folder = await createFolder({ parentPath: tempRoot, name: "Folder" });
+    const child = await createFolder({ parentPath: folder.path, name: "Child" });
+    await fs.writeFile(path.join(folder.path, "note.txt"), "content", "utf8");
+
+    await expect(copyItems({ sources: [folder.path], destination: folder.path })).rejects.toThrow(
+      "Cannot copy a folder into itself"
+    );
+    await expect(copyItems({ sources: [folder.path], destination: child.path })).rejects.toThrow(
+      "Cannot copy a folder into itself"
+    );
+
+    await expect(fs.access(path.join(folder.path, "note.txt"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(child.path, "Folder"))).rejects.toThrow();
+  });
+
   it("creates files from template content and expands date variables", async () => {
     expect(expandDateVariables("note-$date(yyyy-MM-dd).md", new Date("2026-06-09T10:11:12"))).toBe(
       "note-2026-06-09.md"
