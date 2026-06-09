@@ -29,7 +29,7 @@ import type {
   HashRequest,
   RenameRequest,
   SearchOptions,
-  WorkspaceSnapshot
+  WorkspaceDocument
 } from "../src/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -99,7 +99,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("space:open-terminal", (_event, directoryPath: string) => openTerminal(directoryPath));
   ipcMain.handle("space:get-workspace", () => workspaceStore.read());
-  ipcMain.handle("space:save-workspace", (_event, snapshot: WorkspaceSnapshot) => workspaceStore.write(snapshot));
+  ipcMain.handle("space:save-workspace", (_event, snapshot: WorkspaceDocument) => workspaceStore.write(snapshot));
 }
 
 app.whenReady().then(() => {

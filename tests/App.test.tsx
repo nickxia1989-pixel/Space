@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
 
 describe("App", () => {
@@ -36,5 +36,22 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Folder sync"));
     expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
+  });
+
+  it("creates, renames, and clones workspace tabs", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Design");
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Default" })).toBeInTheDocument());
+    await user.click(screen.getByLabelText("New workspace"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Workspace 2" })).toBeInTheDocument());
+
+    await user.click(screen.getByLabelText("Rename workspace"));
+    expect(screen.getByRole("tab", { name: "Design" })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Clone workspace"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Design Copy" })).toBeInTheDocument());
+    promptSpy.mockRestore();
   });
 });

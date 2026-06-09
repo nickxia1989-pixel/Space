@@ -13,7 +13,7 @@
 | Search/filter | Renderer tests and browser interaction check |
 | Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage |
 | Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage |
-| Workspace persistence | `electron/workspaceStore.ts`; smoke launch loads app with store available |
+| Workspace tabs and persistence | `tests/App.test.tsx`; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
 | Type safety | `npm run typecheck` |
 | Production build | `npm run build` |
 
@@ -44,7 +44,8 @@ Expected result: all commands exit with code `0`.
 10. Select a text or image file and verify the inspector preview, metadata, reveal action, and SHA-256 action.
 11. Select multiple files, open Batch Rename, confirm preview status, apply, and verify renamed files appear in the pane.
 12. Open two folders in separate panes, use Folder Sync, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
-13. Restart the app and confirm pane locations, layout, active pane, and bookmarks are restored.
+13. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
+14. Restart the app and confirm workspace tabs, pane locations, layout, active pane, and bookmarks are restored.
 
 ## Browser Renderer Checks
 

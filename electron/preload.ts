@@ -9,7 +9,7 @@ import type {
   RenameRequest,
   SearchOptions,
   SpaceApi,
-  WorkspaceSnapshot
+  WorkspaceDocument
 } from "../src/shared.js";
 
 const api: SpaceApi = {
@@ -32,7 +32,7 @@ const api: SpaceApi = {
   revealPath: (path: string) => ipcRenderer.invoke("space:reveal-path", path),
   openTerminal: (path: string) => ipcRenderer.invoke("space:open-terminal", path),
   getWorkspace: () => ipcRenderer.invoke("space:get-workspace"),
-  saveWorkspace: (snapshot: WorkspaceSnapshot) => ipcRenderer.invoke("space:save-workspace", snapshot)
+  saveWorkspace: (snapshot: WorkspaceDocument) => ipcRenderer.invoke("space:save-workspace", snapshot)
 };
 
 contextBridge.exposeInMainWorld("spaceAPI", api);

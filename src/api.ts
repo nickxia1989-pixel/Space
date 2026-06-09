@@ -17,7 +17,7 @@ import type {
   RenameRequest,
   SearchOptions,
   SpaceApi,
-  WorkspaceSnapshot
+  WorkspaceDocument
 } from "./shared";
 import { pathName, parentPath } from "./pathUtils";
 
@@ -31,7 +31,7 @@ const mockKnownLocations: KnownLocation[] = [
   { id: "pictures", label: "Pictures", path: `${mockHome}\\Pictures`, icon: "image" }
 ];
 
-let mockWorkspace: WorkspaceSnapshot | null = null;
+let mockWorkspace: WorkspaceDocument | null = null;
 const mockEntries = new Map<string, FileEntry[]>();
 
 function createMockEntry(parent: string, name: string, isDirectory: boolean, size = 0): FileEntry {
@@ -217,7 +217,7 @@ function createBrowserMockApi(): SpaceApi {
     async getWorkspace() {
       return mockWorkspace;
     },
-    async saveWorkspace(snapshot: WorkspaceSnapshot) {
+    async saveWorkspace(snapshot: WorkspaceDocument) {
       mockWorkspace = snapshot;
       return mockResult("Workspace saved.");
     }

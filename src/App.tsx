@@ -21,6 +21,8 @@ import {
   MoreVertical,
   Music,
   PanelRight,
+  Pencil,
+  Plus,
   RefreshCcw,
   Rows3,
   Scissors,
@@ -57,7 +59,9 @@ import type {
   SortKey,
   SpaceApi,
   ViewMode,
+  WorkspaceDocument,
   WorkspacePaneSnapshot,
+  WorkspaceRecord,
   WorkspaceSnapshot
 } from "./shared";
 
@@ -155,21 +159,58 @@ function getDefaultSnapshots(bootstrap: BootstrapPayload): WorkspacePaneSnapshot
   return paths.map((filePath, index) => defaultPaneSnapshot(index + 1, filePath));
 }
 
-function normalizeWorkspace(saved: WorkspaceSnapshot | null, bootstrap: BootstrapPayload): WorkspaceSnapshot {
-  if (!saved || saved.panes.length !== 4) {
+function createWorkspaceId(): string {
+  return `workspace-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function createWorkspaceRecord(name: string, snapshot: WorkspaceSnapshot, id = createWorkspaceId()): WorkspaceRecord {
+  return {
+    ...snapshot,
+    id,
+    name
+  };
+}
+
+function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceSnapshot {
+  return {
+    layout: "grid",
+    activePaneId: 1,
+    panes: getDefaultSnapshots(bootstrap),
+    bookmarks: [],
+    savedAt: Date.now()
+  };
+}
+
+function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapPayload): WorkspaceRecord {
+  return {
+    ...record,
+    id: record.id || createWorkspaceId(),
+    name: record.name || "Workspace",
+    layout: record.layout ?? "grid",
+    activePaneId: paneIds.includes(record.activePaneId) ? record.activePaneId : 1,
+    panes: paneIds.map((id) => record.panes.find((pane) => pane.id === id) ?? defaultPaneSnapshot(id, bootstrap.homePath)),
+    bookmarks: record.bookmarks ?? [],
+    savedAt: record.savedAt ?? Date.now()
+  };
+}
+
+function normalizeWorkspaceDocument(saved: WorkspaceDocument | null, bootstrap: BootstrapPayload): WorkspaceDocument {
+  if (!saved || !Array.isArray(saved.workspaces) || saved.workspaces.length === 0) {
+    const workspace = createWorkspaceRecord("Default", createDefaultWorkspaceSnapshot(bootstrap), "default");
     return {
-      layout: "grid",
-      activePaneId: 1,
-      panes: getDefaultSnapshots(bootstrap),
-      bookmarks: [],
+      activeWorkspaceId: workspace.id,
+      workspaces: [workspace],
       savedAt: Date.now()
     };
   }
+
+  const workspaces = saved.workspaces.map((workspace) => normalizeWorkspaceRecord(workspace, bootstrap));
+  const activeWorkspaceId = workspaces.some((workspace) => workspace.id === saved.activeWorkspaceId)
+    ? saved.activeWorkspaceId
+    : workspaces[0].id;
   return {
-    layout: saved.layout ?? "grid",
-    activePaneId: paneIds.includes(saved.activePaneId) ? saved.activePaneId : 1,
-    panes: paneIds.map((id) => saved.panes.find((pane) => pane.id === id) ?? defaultPaneSnapshot(id, bootstrap.homePath)),
-    bookmarks: saved.bookmarks ?? [],
+    activeWorkspaceId,
+    workspaces,
     savedAt: saved.savedAt ?? Date.now()
   };
 }
@@ -210,6 +251,8 @@ export default function App() {
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [activePaneId, setActivePaneId] = useState(1);
   const [bookmarks, setBookmarks] = useState<KnownLocation[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -221,6 +264,7 @@ export default function App() {
   const toastCounter = useRef(0);
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const selectedEntries = activePane
     ? activePane.entries.filter((entry) => containsPath(activePane.selectedPaths, entry.path))
     : [];
@@ -232,10 +276,13 @@ export default function App() {
     async function boot() {
       try {
         const bootPayload = await api.bootstrap();
-        const workspace = normalizeWorkspace(await api.getWorkspace(), bootPayload);
+        const workspaceDocument = normalizeWorkspaceDocument(await api.getWorkspace(), bootPayload);
+        const workspace = workspaceDocument.workspaces.find((item) => item.id === workspaceDocument.activeWorkspaceId) ?? workspaceDocument.workspaces[0];
         const hydrated = workspace.panes.map(hydratePane);
 
         setBootstrap(bootPayload);
+        setWorkspaces(workspaceDocument.workspaces);
+        setActiveWorkspaceId(workspace.id);
         setLayout(workspace.layout);
         setActivePaneId(workspace.activePaneId);
         setBookmarks(workspace.bookmarks);
@@ -280,7 +327,7 @@ export default function App() {
   }, [api]);
 
   useEffect(() => {
-    if (!initialized || panes.length !== 4) return;
+    if (!initialized || panes.length !== 4 || !activeWorkspaceId || workspaces.length === 0) return;
     const timer = window.setTimeout(() => {
       const snapshot: WorkspaceSnapshot = {
         layout,
@@ -289,10 +336,17 @@ export default function App() {
         bookmarks,
         savedAt: Date.now()
       };
-      void api.saveWorkspace(snapshot);
+      const workspaceDocument: WorkspaceDocument = {
+        activeWorkspaceId,
+        workspaces: workspaces.map((workspace) =>
+          workspace.id === activeWorkspaceId ? { ...workspace, ...snapshot } : workspace
+        ),
+        savedAt: Date.now()
+      };
+      void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, api, bookmarks, initialized, layout, panes]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, initialized, layout, panes, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -315,6 +369,105 @@ export default function App() {
 
   function updatePane(paneId: number, updater: (pane: PaneState) => PaneState) {
     setPanes((current) => current.map((pane) => (pane.id === paneId ? updater(pane) : pane)));
+  }
+
+  function getCurrentWorkspaceSnapshot(): WorkspaceSnapshot {
+    return {
+      layout,
+      activePaneId,
+      panes: panes.map(snapshotFromPane),
+      bookmarks,
+      savedAt: Date.now()
+    };
+  }
+
+  function saveCurrentWorkspaceToList(records = workspaces): WorkspaceRecord[] {
+    if (!activeWorkspaceId || panes.length !== 4) return records;
+    const snapshot = getCurrentWorkspaceSnapshot();
+    return records.map((workspace) => (workspace.id === activeWorkspaceId ? { ...workspace, ...snapshot } : workspace));
+  }
+
+  async function loadWorkspaceRecord(workspace: WorkspaceRecord) {
+    setActiveWorkspaceId(workspace.id);
+    setLayout(workspace.layout);
+    setActivePaneId(workspace.activePaneId);
+    setBookmarks(workspace.bookmarks);
+    setPreviewPath(null);
+    setHashLine("");
+    setClipboard(null);
+    setContextMenu(null);
+    const hydrated = workspace.panes.map(hydratePane);
+    setPanes(hydrated);
+
+    const loaded = await Promise.all(
+      hydrated.map(async (pane) => {
+        try {
+          const payload = await api.listDirectory(pane.path);
+          return {
+            ...pane,
+            path: payload.path,
+            addressDraft: payload.path,
+            entries: payload.entries,
+            loading: false,
+            scannedAt: payload.scannedAt
+          };
+        } catch (error) {
+          return {
+            ...pane,
+            entries: [],
+            error: getErrorMessage(error),
+            loading: false
+          };
+        }
+      })
+    );
+    setPanes(loaded);
+  }
+
+  async function switchWorkspace(workspaceId: string) {
+    if (workspaceId === activeWorkspaceId) return;
+    const nextWorkspaces = saveCurrentWorkspaceToList();
+    const target = nextWorkspaces.find((workspace) => workspace.id === workspaceId);
+    if (!target) return;
+    setWorkspaces(nextWorkspaces);
+    await loadWorkspaceRecord(target);
+  }
+
+  async function createNewWorkspace() {
+    if (!bootstrap) return;
+    const record = createWorkspaceRecord(`Workspace ${workspaces.length + 1}`, createDefaultWorkspaceSnapshot(bootstrap));
+    setWorkspaces((current) => [...saveCurrentWorkspaceToList(current), record]);
+    await loadWorkspaceRecord(record);
+    showToast("success", "Workspace created.");
+  }
+
+  async function cloneWorkspace() {
+    const sourceName = activeWorkspace?.name ?? "Workspace";
+    const record = createWorkspaceRecord(`${sourceName} Copy`, getCurrentWorkspaceSnapshot());
+    setWorkspaces((current) => [...saveCurrentWorkspaceToList(current), record]);
+    await loadWorkspaceRecord(record);
+    showToast("success", "Workspace cloned.");
+  }
+
+  function renameWorkspace() {
+    if (!activeWorkspace) return;
+    const name = window.prompt("Workspace name", activeWorkspace.name);
+    if (!name?.trim()) return;
+    setWorkspaces((current) =>
+      current.map((workspace) => (workspace.id === activeWorkspace.id ? { ...workspace, name: name.trim() } : workspace))
+    );
+  }
+
+  async function deleteWorkspace() {
+    if (!activeWorkspace || workspaces.length <= 1) return;
+    const ok = window.confirm(`Delete workspace "${activeWorkspace.name}"?`);
+    if (!ok) return;
+    const activeIndex = workspaces.findIndex((workspace) => workspace.id === activeWorkspace.id);
+    const remaining = workspaces.filter((workspace) => workspace.id !== activeWorkspace.id);
+    const next = remaining[Math.max(0, Math.min(activeIndex, remaining.length - 1))];
+    setWorkspaces(remaining);
+    await loadWorkspaceRecord(next);
+    showToast("success", "Workspace deleted.");
   }
 
   async function loadPane(paneId: number, targetPath: string, mode: "push" | "replace" = "push") {
@@ -700,6 +853,16 @@ export default function App() {
         </div>
       </header>
 
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        onSwitch={(workspaceId) => void switchWorkspace(workspaceId)}
+        onNew={() => void createNewWorkspace()}
+        onClone={() => void cloneWorkspace()}
+        onRename={renameWorkspace}
+        onDelete={() => void deleteWorkspace()}
+      />
+
       <section className="workspace">
         <Sidebar
           bootstrap={bootstrap}
@@ -845,6 +1008,49 @@ function Sidebar({
         ))}
       </section>
     </aside>
+  );
+}
+
+function WorkspaceTabs({
+  workspaces,
+  activeWorkspaceId,
+  onSwitch,
+  onNew,
+  onClone,
+  onRename,
+  onDelete
+}: {
+  workspaces: WorkspaceRecord[];
+  activeWorkspaceId: string;
+  onSwitch: (workspaceId: string) => void;
+  onNew: () => void;
+  onClone: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <nav className="workspace-tabs" aria-label="Workspaces">
+      <div className="workspace-tab-list" role="tablist">
+        {workspaces.map((workspace) => (
+          <button
+            key={workspace.id}
+            className={`workspace-tab ${workspace.id === activeWorkspaceId ? "active" : ""}`}
+            role="tab"
+            aria-selected={workspace.id === activeWorkspaceId}
+            onClick={() => onSwitch(workspace.id)}
+            title={workspace.name}
+          >
+            <span>{workspace.name}</span>
+          </button>
+        ))}
+      </div>
+      <div className="workspace-tab-actions">
+        <IconButton title="New workspace" onClick={onNew} icon={Plus} />
+        <IconButton title="Clone workspace" onClick={onClone} icon={Copy} disabled={!activeWorkspaceId} />
+        <IconButton title="Rename workspace" onClick={onRename} icon={Pencil} disabled={!activeWorkspaceId} />
+        <IconButton title="Delete workspace" onClick={onDelete} icon={Trash2} disabled={workspaces.length <= 1} />
+      </div>
+    </nav>
   );
 }
 

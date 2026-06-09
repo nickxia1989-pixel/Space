@@ -80,6 +80,17 @@ export interface WorkspaceSnapshot {
   savedAt: number;
 }
 
+export interface WorkspaceRecord extends WorkspaceSnapshot {
+  id: string;
+  name: string;
+}
+
+export interface WorkspaceDocument {
+  activeWorkspaceId: string;
+  workspaces: WorkspaceRecord[];
+  savedAt: number;
+}
+
 export interface OperationResult {
   ok: boolean;
   message: string;
@@ -202,8 +213,8 @@ export interface SpaceApi {
   openPath(path: string): Promise<OperationResult>;
   revealPath(path: string): Promise<OperationResult>;
   openTerminal(path: string): Promise<OperationResult>;
-  getWorkspace(): Promise<WorkspaceSnapshot | null>;
-  saveWorkspace(snapshot: WorkspaceSnapshot): Promise<OperationResult>;
+  getWorkspace(): Promise<WorkspaceDocument | null>;
+  saveWorkspace(snapshot: WorkspaceDocument): Promise<OperationResult>;
 }
 
 declare global {
