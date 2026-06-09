@@ -13,6 +13,7 @@ import {
   applyFolderSync,
   createArchive,
   extractArchive,
+  expandDateVariables,
   listDirectory,
   listArchive,
   moveItems,
@@ -81,6 +82,22 @@ describe("fileService", () => {
 
     expect(path.basename(firstCopy.affectedPaths![0])).toBe("report copy.txt");
     expect(path.basename(secondCopy.affectedPaths![0])).toBe("report copy 2.txt");
+  });
+
+  it("creates files from template content and expands date variables", async () => {
+    expect(expandDateVariables("note-$date(yyyy-MM-dd).md", new Date("2026-06-09T10:11:12"))).toBe(
+      "note-2026-06-09.md"
+    );
+
+    const year = String(new Date().getFullYear());
+    const file = await createFile({
+      parentPath: tempRoot,
+      name: "report-$date(yyyy).md",
+      content: "# Report $date(yyyy)\n"
+    });
+
+    expect(path.basename(file.path)).toBe(`report-${year}.md`);
+    await expect(fs.readFile(file.path, "utf8")).resolves.toBe(`# Report ${year}\n`);
   });
 
   it("does not move an item when the destination is already its parent directory", async () => {

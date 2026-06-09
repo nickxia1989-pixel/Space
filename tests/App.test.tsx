@@ -24,6 +24,24 @@ describe("App", () => {
     expect(screen.getAllByLabelText("Icon view")[0]).toHaveClass("active");
   });
 
+  it("creates files from the new file template panel", async () => {
+    const user = userEvent.setup();
+    const today = new Date().toISOString().slice(0, 10);
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("New file"));
+    const dialog = screen.getByRole("dialog", { name: "New file" });
+    const markdownButton = within(dialog).getByText("Markdown Note").closest("button");
+    expect(markdownButton).not.toBeNull();
+    await user.click(markdownButton!);
+
+    expect(within(dialog).getByDisplayValue(`Note-${today}.md`)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(screen.getByText(`Note-${today}.md`)).toBeInTheDocument());
+  });
+
   it("opens advanced batch rename and folder sync panels", async () => {
     const user = userEvent.setup();
     render(<App />);

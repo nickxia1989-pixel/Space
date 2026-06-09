@@ -51,6 +51,7 @@ import type {
   HashAlgorithm,
   KnownLocation,
   LayoutMode,
+  NewFileTemplate,
   OperationResult,
   BatchRenamePreview,
   BatchRenameRule,
@@ -121,6 +122,44 @@ const iconByName: Record<string, LucideIcon> = {
   video: Video
 };
 
+const defaultFileTemplates: NewFileTemplate[] = [
+  {
+    id: "default-blank-text",
+    label: "Blank Text",
+    fileName: "New File.txt",
+    content: "",
+    createdAt: 0
+  },
+  {
+    id: "default-markdown-note",
+    label: "Markdown Note",
+    fileName: "Note-$date(yyyy-MM-dd).md",
+    content: "# $date(yyyy-MM-dd)\n\n",
+    createdAt: 0
+  },
+  {
+    id: "default-json",
+    label: "JSON",
+    fileName: "data-$date(yyyyMMdd).json",
+    content: "{\n  \"createdAt\": \"$date(yyyy-MM-dd HH:mm:ss)\"\n}\n",
+    createdAt: 0
+  },
+  {
+    id: "default-powershell",
+    label: "PowerShell Script",
+    fileName: "script-$date(yyyyMMdd).ps1",
+    content: "# Created $date(yyyy-MM-dd HH:mm:ss)\n\n",
+    createdAt: 0
+  },
+  {
+    id: "default-html",
+    label: "HTML Page",
+    fileName: "index.html",
+    content: "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\" />\n  <title>New Page</title>\n</head>\n<body>\n  <main></main>\n</body>\n</html>\n",
+    createdAt: 0
+  }
+];
+
 function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapshot {
   return {
     id,
@@ -187,6 +226,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     panes: getDefaultSnapshots(bootstrap),
     bookmarks: [],
     stashItems: [],
+    fileTemplates: [],
     savedAt: Date.now()
   };
 }
@@ -201,6 +241,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     panes: paneIds.map((id) => record.panes.find((pane) => pane.id === id) ?? defaultPaneSnapshot(id, bootstrap.homePath)),
     bookmarks: record.bookmarks ?? [],
     stashItems: record.stashItems ?? [],
+    fileTemplates: record.fileTemplates ?? [],
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -268,6 +309,7 @@ export default function App() {
   const [activePaneId, setActivePaneId] = useState(1);
   const [bookmarks, setBookmarks] = useState<KnownLocation[]>([]);
   const [stashItems, setStashItems] = useState<StashShelfItem[]>([]);
+  const [fileTemplates, setFileTemplates] = useState<NewFileTemplate[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -276,6 +318,7 @@ export default function App() {
   const [initialized, setInitialized] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [hashLine, setHashLine] = useState<string>("");
+  const [newFileOpen, setNewFileOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
@@ -305,6 +348,7 @@ export default function App() {
         setActivePaneId(workspace.activePaneId);
         setBookmarks(workspace.bookmarks);
         setStashItems(workspace.stashItems ?? []);
+        setFileTemplates(workspace.fileTemplates ?? []);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -354,6 +398,7 @@ export default function App() {
         panes: panes.map(snapshotFromPane),
         bookmarks,
         stashItems,
+        fileTemplates,
         savedAt: Date.now()
       };
       const workspaceDocument: WorkspaceDocument = {
@@ -366,7 +411,7 @@ export default function App() {
       void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, initialized, layout, panes, stashItems, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, fileTemplates, initialized, layout, panes, stashItems, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -398,6 +443,7 @@ export default function App() {
       panes: panes.map(snapshotFromPane),
       bookmarks,
       stashItems,
+      fileTemplates,
       savedAt: Date.now()
     };
   }
@@ -414,6 +460,7 @@ export default function App() {
     setActivePaneId(workspace.activePaneId);
     setBookmarks(workspace.bookmarks);
     setStashItems(workspace.stashItems ?? []);
+    setFileTemplates(workspace.fileTemplates ?? []);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
@@ -693,6 +740,32 @@ export default function App() {
     );
   }
 
+  async function createTemplatedFile(request: { name: string; content: string; saveTemplateName?: string }) {
+    if (!activePane) return;
+    try {
+      const result = await api.createFile({ parentPath: activePane.path, name: request.name, content: request.content });
+      showToast("success", `Created ${result.name}.`);
+      await refreshPane(activePane.id);
+      const savedTemplateName = request.saveTemplateName?.trim();
+      if (savedTemplateName) {
+        setFileTemplates((current) => [
+          ...current,
+          {
+            id: `template-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            label: savedTemplateName,
+            fileName: request.name,
+            content: request.content,
+            createdAt: Date.now()
+          }
+        ]);
+        showToast("success", "Template saved.");
+      }
+      setNewFileOpen(false);
+    } catch (error) {
+      showToast("error", `Create file failed: ${getErrorMessage(error)}`);
+    }
+  }
+
   async function renameSelected() {
     if (!activePane || activePane.selectedPaths.length !== 1) return;
     const sourcePath = activePane.selectedPaths[0];
@@ -937,7 +1010,7 @@ export default function App() {
 
         <div className="toolbar" role="toolbar" aria-label="File operations">
           <IconButton title="New folder" onClick={() => void createItem("folder")} icon={FolderPlus} />
-          <IconButton title="New file" onClick={() => void createItem("file")} icon={FilePlus2} />
+          <IconButton title="New file" onClick={() => setNewFileOpen(true)} icon={FilePlus2} />
           <span className="toolbar-divider" />
           <IconButton title="Copy" onClick={() => copySelection("copy")} icon={Copy} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Cut" onClick={() => copySelection("cut")} icon={Scissors} disabled={!activePane?.selectedPaths.length} />
@@ -1063,6 +1136,16 @@ export default function App() {
           onReveal={() => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), [])}
           canPaste={!!clipboard?.paths.length}
           canAct={!!activePane?.selectedPaths.length}
+        />
+      )}
+
+      {newFileOpen && activePane && (
+        <NewFileModal
+          templates={[...defaultFileTemplates, ...fileTemplates]}
+          destinationPath={activePane.path}
+          onClose={() => setNewFileOpen(false)}
+          onCreate={(request) => void createTemplatedFile(request)}
+          onDeleteTemplate={(templateId) => setFileTemplates((current) => current.filter((template) => template.id !== templateId))}
         />
       )}
 
@@ -1788,6 +1871,141 @@ function ArchiveBrowserModal({
       </section>
     </div>
   );
+}
+
+function NewFileModal({
+  templates,
+  destinationPath,
+  onClose,
+  onCreate,
+  onDeleteTemplate
+}: {
+  templates: NewFileTemplate[];
+  destinationPath: string;
+  onClose: () => void;
+  onCreate: (request: { name: string; content: string; saveTemplateName?: string }) => void;
+  onDeleteTemplate: (templateId: string) => void;
+}) {
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id ?? "");
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
+  const [fileName, setFileName] = useState(selectedTemplate?.fileName ?? "New File.txt");
+  const [content, setContent] = useState(selectedTemplate?.content ?? "");
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const previewName = expandDatePreview(fileName);
+  const canDeleteTemplate = !!selectedTemplate && selectedTemplate.createdAt > 0;
+
+  function chooseTemplate(templateId: string) {
+    const template = templates.find((item) => item.id === templateId);
+    if (!template) return;
+    setSelectedTemplateId(template.id);
+    setFileName(template.fileName);
+    setContent(template.content);
+    setSaveAsTemplate(false);
+    setTemplateName("");
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal new-file-modal" role="dialog" aria-modal="true" aria-label="New file">
+        <header className="modal-header">
+          <div>
+            <h2>New File</h2>
+            <span title={destinationPath}>{destinationPath}</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="new-file-body">
+          <div className="template-list" aria-label="File templates">
+            {templates.map((template) => (
+              <button
+                key={template.id}
+                className={template.id === selectedTemplateId ? "active" : ""}
+                onClick={() => chooseTemplate(template.id)}
+              >
+                <span>{template.label}</span>
+                <small>{template.fileName}</small>
+              </button>
+            ))}
+          </div>
+
+          <div className="template-editor">
+            <label>
+              Name
+              <input value={fileName} onChange={(event) => setFileName(event.target.value)} spellCheck={false} />
+            </label>
+            <label>
+              Preview
+              <input value={previewName} readOnly spellCheck={false} />
+            </label>
+            <label className="template-content-label">
+              Content
+              <textarea value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={saveAsTemplate}
+                onChange={(event) => setSaveAsTemplate(event.target.checked)}
+              />
+              Save as template
+            </label>
+            {saveAsTemplate && (
+              <label>
+                Template name
+                <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+              </label>
+            )}
+          </div>
+        </div>
+
+        <footer className="modal-footer">
+          <button onClick={onClose}>Cancel</button>
+          <button
+            disabled={!canDeleteTemplate}
+            onClick={() => {
+              if (!selectedTemplate) return;
+              onDeleteTemplate(selectedTemplate.id);
+              if (templates[0]) chooseTemplate(templates[0].id);
+            }}
+          >
+            Delete Template
+          </button>
+          <button
+            className="primary"
+            disabled={!fileName.trim()}
+            onClick={() => onCreate({ name: fileName, content, saveTemplateName: saveAsTemplate ? templateName : undefined })}
+          >
+            Create
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function expandDatePreview(value: string, date = new Date()): string {
+  return value.replace(/\$date\(([^)]+)\)/g, (_match, format: string) => formatDatePreview(format, date));
+}
+
+function formatDatePreview(format: string, date: Date): string {
+  const pad = (value: number, length = 2) => String(value).padStart(length, "0");
+  const replacements: Record<string, string> = {
+    yyyy: String(date.getFullYear()),
+    yy: String(date.getFullYear()).slice(-2),
+    MM: pad(date.getMonth() + 1),
+    M: String(date.getMonth() + 1),
+    dd: pad(date.getDate()),
+    d: String(date.getDate()),
+    HH: pad(date.getHours()),
+    H: String(date.getHours()),
+    mm: pad(date.getMinutes()),
+    m: String(date.getMinutes()),
+    ss: pad(date.getSeconds()),
+    s: String(date.getSeconds())
+  };
+  return format.replace(/yyyy|yy|MM|M|dd|d|HH|H|mm|m|ss|s/g, (token) => replacements[token]);
 }
 
 const defaultBatchRenameRule: BatchRenameRule = {

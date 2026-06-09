@@ -54,6 +54,14 @@ export interface StashShelfItem {
   addedAt: number;
 }
 
+export interface NewFileTemplate {
+  id: string;
+  label: string;
+  fileName: string;
+  content: string;
+  createdAt: number;
+}
+
 export interface BootstrapPayload {
   homePath: string;
   knownLocations: KnownLocation[];
@@ -87,6 +95,7 @@ export interface WorkspaceSnapshot {
   panes: WorkspacePaneSnapshot[];
   bookmarks: KnownLocation[];
   stashItems?: StashShelfItem[];
+  fileTemplates?: NewFileTemplate[];
   savedAt: number;
 }
 
@@ -127,6 +136,7 @@ export interface RenameRequest {
 export interface CreateItemRequest {
   parentPath: string;
   name: string;
+  content?: string;
 }
 
 export interface DeleteRequest {

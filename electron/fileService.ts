@@ -207,11 +207,33 @@ export async function createFolder(request: CreateItemRequest): Promise<FileEntr
 }
 
 export async function createFile(request: CreateItemRequest): Promise<FileEntry> {
-  const name = validateItemName(request.name);
+  const name = validateItemName(expandDateVariables(request.name));
   const targetPath = await uniqueTargetPath(path.join(normalizeInputPath(request.parentPath), name));
-  const handle = await fsp.open(targetPath, "wx");
-  await handle.close();
+  await fsp.writeFile(targetPath, expandDateVariables(request.content ?? ""), { encoding: "utf8", flag: "wx" });
   return getFileEntry(targetPath);
+}
+
+export function expandDateVariables(value: string, date = new Date()): string {
+  return value.replace(/\$date\(([^)]+)\)/g, (_match, format: string) => formatDateTemplate(format, date));
+}
+
+function formatDateTemplate(format: string, date: Date): string {
+  const pad = (value: number, length = 2) => String(value).padStart(length, "0");
+  const replacements: Record<string, string> = {
+    yyyy: String(date.getFullYear()),
+    yy: String(date.getFullYear()).slice(-2),
+    MM: pad(date.getMonth() + 1),
+    M: String(date.getMonth() + 1),
+    dd: pad(date.getDate()),
+    d: String(date.getDate()),
+    HH: pad(date.getHours()),
+    H: String(date.getHours()),
+    mm: pad(date.getMinutes()),
+    m: String(date.getMinutes()),
+    ss: pad(date.getSeconds()),
+    s: String(date.getSeconds())
+  };
+  return format.replace(/yyyy|yy|MM|M|dd|d|HH|H|mm|m|ss|s/g, (token) => replacements[token]);
 }
 
 export async function renameItem(request: RenameRequest): Promise<FileEntry> {

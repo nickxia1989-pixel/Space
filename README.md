@@ -8,10 +8,11 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Per-pane navigation: back, forward, up, refresh, breadcrumb navigation, and editable address bar.
 - Per-pane details/icon views, sortable details columns, multi-select, status bar, and active-pane highlighting.
 - Quick Access sidebar for common Windows user folders, drive list, and user bookmarks.
-- File operations through Electron IPC: create folder, create file, rename, delete to trash, copy, move, open, reveal in Explorer, and open terminal.
+- File operations through Electron IPC: create folder, create templated file, rename, delete to trash, copy, move, open, reveal in Explorer, and open terminal.
 - Cross-pane workflows: copy/move selected files to any other pane, internal copy/cut/paste, and drag/drop copy or shift-drop move.
 - Search/filter: instant pane filtering and recursive search with bounded results.
 - Workspace persistence: pane paths, histories, layout, active pane, and bookmarks are restored between launches.
+- New File Templates: create files from built-in or workspace-saved templates, edit template content, and use `$date(...)` variables in names or content.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
 - Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, and apply.
 - Folder sync: compare two panes, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, and execute the sync.

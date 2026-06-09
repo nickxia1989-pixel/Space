@@ -59,6 +59,27 @@ function createMockEntry(parent: string, name: string, isDirectory: boolean, siz
   };
 }
 
+function expandMockDateVariables(value: string, date = new Date()): string {
+  return value.replace(/\$date\(([^)]+)\)/g, (_match, format: string) => {
+    const pad = (part: number, length = 2) => String(part).padStart(length, "0");
+    const replacements: Record<string, string> = {
+      yyyy: String(date.getFullYear()),
+      yy: String(date.getFullYear()).slice(-2),
+      MM: pad(date.getMonth() + 1),
+      M: String(date.getMonth() + 1),
+      dd: pad(date.getDate()),
+      d: String(date.getDate()),
+      HH: pad(date.getHours()),
+      H: String(date.getHours()),
+      mm: pad(date.getMinutes()),
+      m: String(date.getMinutes()),
+      ss: pad(date.getSeconds()),
+      s: String(date.getSeconds())
+    };
+    return format.replace(/yyyy|yy|MM|M|dd|d|HH|H|mm|m|ss|s/g, (token) => replacements[token]);
+  });
+}
+
 function seedMockEntries(): void {
   if (mockEntries.size > 0) return;
   mockEntries.set(mockHome, [
@@ -125,7 +146,7 @@ function createBrowserMockApi(): SpaceApi {
       return entry;
     },
     async createFile(request: CreateItemRequest) {
-      const entry = createMockEntry(request.parentPath, request.name, false);
+      const entry = createMockEntry(request.parentPath, expandMockDateVariables(request.name), false);
       mockEntries.set(request.parentPath, [...(mockEntries.get(request.parentPath) ?? []), entry]);
       return entry;
     },
