@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
@@ -36,6 +36,24 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Folder sync"));
     expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
+  });
+
+  it("collects selected files in the stash shelf and hashes them", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Add selection to shelf"));
+
+    const shelf = screen.getByRole("region", { name: "Stash Shelf" });
+    expect(within(shelf).getByText("Space Notes.md")).toBeInTheDocument();
+
+    await user.click(within(shelf).getByRole("button", { name: "Hash" }));
+    expect(await screen.findByText(/Shelf SHA-256/)).toBeInTheDocument();
+
+    await user.click(within(shelf).getByRole("button", { name: "Clear" }));
+    expect(within(shelf).queryByText("Space Notes.md")).not.toBeInTheDocument();
   });
 
   it("opens zip archives in the archive browser", async () => {

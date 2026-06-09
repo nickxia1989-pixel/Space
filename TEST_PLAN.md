@@ -14,6 +14,7 @@
 | Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage |
 | Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage |
 | Workspace tabs and persistence | `tests/App.test.tsx`; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
+| Stash Shelf | `tests/App.test.tsx` shelf add/hash/clear coverage; manual copy/move shelf checks |
 | ZIP archives | `tests/fileService.test.ts` create/list/preview/extract coverage; `tests/App.test.tsx` archive browser coverage |
 | Type safety | `npm run typecheck` |
 | Production build | `npm run build` |
@@ -49,10 +50,11 @@ Expected result: all commands exit with code `0`.
 11. Select multiple files, open Batch Rename, confirm preview status, apply, and verify renamed files appear in the pane.
 12. Open two folders in separate panes, use Folder Sync, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
 13. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
-14. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all.
-15. Restart the app and confirm workspace tabs, pane locations, layout, active pane, and bookmarks are restored.
-16. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
-17. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
+14. Select files in multiple panes, add them to Stash Shelf, preview a shelf item, copy the shelf to the active pane, move another shelf batch to the active pane, remove one shelf item, clear the shelf, and calculate SHA-256 for staged files.
+15. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all.
+16. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, and Stash Shelf items are restored.
+17. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
+18. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
 ## Browser Renderer Checks
 
@@ -68,6 +70,7 @@ Open `http://127.0.0.1:5173/` and verify:
 - Layout switcher changes grid/columns/rows/focus modes.
 - Pane 1 can switch to icon view.
 - Filtering `Space` in pane 1 reduces the mock result set.
+- Adding `Space Notes.md` to Stash Shelf shows it in the left sidebar and Hash reports a shelf SHA-256 line.
 - No console `error` or `warning` entries appear.
 
 ## Review Notes

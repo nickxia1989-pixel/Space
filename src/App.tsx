@@ -59,6 +59,7 @@ import type {
   SortDirection,
   SortKey,
   SpaceApi,
+  StashShelfItem,
   ViewMode,
   WorkspaceDocument,
   ArchiveEntry,
@@ -185,6 +186,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     activePaneId: 1,
     panes: getDefaultSnapshots(bootstrap),
     bookmarks: [],
+    stashItems: [],
     savedAt: Date.now()
   };
 }
@@ -198,6 +200,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     activePaneId: paneIds.includes(record.activePaneId) ? record.activePaneId : 1,
     panes: paneIds.map((id) => record.panes.find((pane) => pane.id === id) ?? defaultPaneSnapshot(id, bootstrap.homePath)),
     bookmarks: record.bookmarks ?? [],
+    stashItems: record.stashItems ?? [],
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -264,6 +267,7 @@ export default function App() {
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [activePaneId, setActivePaneId] = useState(1);
   const [bookmarks, setBookmarks] = useState<KnownLocation[]>([]);
+  const [stashItems, setStashItems] = useState<StashShelfItem[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -282,7 +286,7 @@ export default function App() {
   const selectedEntries = activePane
     ? activePane.entries.filter((entry) => containsPath(activePane.selectedPaths, entry.path))
     : [];
-  const previewTarget = selectedEntries[0]?.path ?? previewPath;
+  const previewTarget = previewPath ?? selectedEntries[0]?.path;
 
   useEffect(() => {
     let cancelled = false;
@@ -300,6 +304,7 @@ export default function App() {
         setLayout(workspace.layout);
         setActivePaneId(workspace.activePaneId);
         setBookmarks(workspace.bookmarks);
+        setStashItems(workspace.stashItems ?? []);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -348,6 +353,7 @@ export default function App() {
         activePaneId,
         panes: panes.map(snapshotFromPane),
         bookmarks,
+        stashItems,
         savedAt: Date.now()
       };
       const workspaceDocument: WorkspaceDocument = {
@@ -360,7 +366,7 @@ export default function App() {
       void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, initialized, layout, panes, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, initialized, layout, panes, stashItems, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -391,6 +397,7 @@ export default function App() {
       activePaneId,
       panes: panes.map(snapshotFromPane),
       bookmarks,
+      stashItems,
       savedAt: Date.now()
     };
   }
@@ -406,6 +413,7 @@ export default function App() {
     setLayout(workspace.layout);
     setActivePaneId(workspace.activePaneId);
     setBookmarks(workspace.bookmarks);
+    setStashItems(workspace.stashItems ?? []);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
@@ -603,6 +611,8 @@ export default function App() {
 
   function selectEntry(paneId: number, entry: FileEntry, event: React.MouseEvent, entries: FileEntry[]) {
     setActivePaneId(paneId);
+    setPreviewPath(null);
+    setHashLine("");
     updatePane(paneId, (pane) => {
       let selectedPaths: string[];
       if (event.shiftKey && pane.anchorPath) {
@@ -761,6 +771,69 @@ export default function App() {
     );
   }
 
+  function addSelectionToShelf() {
+    if (!activePane?.selectedPaths.length) return;
+    const entryByPath = new Map(activePane.entries.map((entry) => [entry.path.toLowerCase(), entry]));
+    const additions = activePane.selectedPaths.map((sourcePath) => {
+      const entry = entryByPath.get(sourcePath.toLowerCase());
+      return {
+        path: sourcePath,
+        label: entry?.name ?? pathName(sourcePath),
+        isDirectory: entry?.isDirectory ?? false,
+        size: entry?.size ?? 0,
+        addedAt: Date.now()
+      };
+    });
+
+    const seen = new Set(stashItems.map((item) => item.path.toLowerCase()));
+    const uniqueAdditions = additions.filter((item) => {
+      const key = item.path.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (uniqueAdditions.length) setStashItems((current) => [...current, ...uniqueAdditions]);
+    showToast(
+      uniqueAdditions.length ? "success" : "info",
+      uniqueAdditions.length ? `Added ${uniqueAdditions.length} item(s) to shelf.` : "Selection is already on the shelf."
+    );
+  }
+
+  async function transferShelf(mode: ClipboardMode) {
+    if (!activePane || stashItems.length === 0) return;
+    try {
+      const sources = stashItems.map((item) => item.path);
+      const result =
+        mode === "copy"
+          ? await api.copyItems({ sources, destination: activePane.path })
+          : await api.moveItems({ sources, destination: activePane.path });
+      showToast("success", result.message);
+      if (mode === "cut") setStashItems([]);
+      await Promise.all((mode === "cut" ? paneIds : [activePane.id]).map((id) => refreshPane(id)));
+    } catch (error) {
+      showToast("error", `Shelf ${mode === "copy" ? "copy" : "move"} failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async function hashShelf() {
+    const files = stashItems.filter((item) => !item.isDirectory).slice(0, 12);
+    if (files.length === 0) {
+      showToast("info", "Shelf has no files to hash.");
+      return;
+    }
+    const lines: string[] = [];
+    for (const item of files) {
+      try {
+        const result = await api.calculateHash({ path: item.path, algorithm: "sha256" });
+        lines.push(`${item.label}: ${result.value}`);
+      } catch (error) {
+        lines.push(`${item.label}: ${getErrorMessage(error)}`);
+      }
+    }
+    setHashLine(`Shelf SHA-256\n${lines.join("\n")}`);
+    showToast("success", `Hashed ${files.length} shelf file(s).`);
+  }
+
   function addBookmark() {
     if (!activePane) return;
     const exists = bookmarks.some((bookmark) => bookmark.path.toLowerCase() === activePane.path.toLowerCase());
@@ -874,6 +947,7 @@ export default function App() {
           <IconButton title="Create ZIP archive" onClick={() => void createArchiveFromSelection()} icon={Archive} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Batch rename" onClick={() => setBatchRenameOpen(true)} icon={FileText} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
+          <IconButton title="Add selection to shelf" onClick={addSelectionToShelf} icon={Plus} disabled={!activePane?.selectedPaths.length} />
           <span className="toolbar-divider" />
           <IconButton title="Refresh" onClick={() => void refreshPane()} icon={RefreshCcw} />
           <IconButton title="Open terminal" onClick={() => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), [])} icon={Terminal} />
@@ -902,8 +976,22 @@ export default function App() {
         <Sidebar
           bootstrap={bootstrap}
           bookmarks={bookmarks}
+          stashItems={stashItems}
+          canAddSelection={!!activePane?.selectedPaths.length}
           onOpen={(targetPath) => activePane && void loadPane(activePane.id, targetPath)}
           onRemoveBookmark={(id) => setBookmarks((current) => current.filter((bookmark) => bookmark.id !== id))}
+          onAddSelectionToShelf={addSelectionToShelf}
+          onPreviewShelfItem={(targetPath) => {
+            setPreviewPath(targetPath);
+            setHashLine("");
+          }}
+          onRemoveShelfItem={(targetPath) =>
+            setStashItems((current) => current.filter((item) => item.path.toLowerCase() !== targetPath.toLowerCase()))
+          }
+          onClearShelf={() => setStashItems([])}
+          onCopyShelf={() => void transferShelf("copy")}
+          onMoveShelf={() => void transferShelf("cut")}
+          onHashShelf={() => void hashShelf()}
         />
 
         <section className={`pane-area layout-${layout}`} aria-label="Explorer panes">
@@ -971,6 +1059,7 @@ export default function App() {
           onRename={() => void renameSelected()}
           onDelete={() => void deleteSelected()}
           onHash={() => void calculateSelectedHash("sha256")}
+          onAddToShelf={addSelectionToShelf}
           onReveal={() => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), [])}
           canPaste={!!clipboard?.paths.length}
           canAct={!!activePane?.selectedPaths.length}
@@ -1014,13 +1103,31 @@ export default function App() {
 function Sidebar({
   bootstrap,
   bookmarks,
+  stashItems,
+  canAddSelection,
   onOpen,
-  onRemoveBookmark
+  onRemoveBookmark,
+  onAddSelectionToShelf,
+  onPreviewShelfItem,
+  onRemoveShelfItem,
+  onClearShelf,
+  onCopyShelf,
+  onMoveShelf,
+  onHashShelf
 }: {
   bootstrap: BootstrapPayload;
   bookmarks: KnownLocation[];
+  stashItems: StashShelfItem[];
+  canAddSelection: boolean;
   onOpen: (path: string) => void;
   onRemoveBookmark: (id: string) => void;
+  onAddSelectionToShelf: () => void;
+  onPreviewShelfItem: (path: string) => void;
+  onRemoveShelfItem: (path: string) => void;
+  onClearShelf: () => void;
+  onCopyShelf: () => void;
+  onMoveShelf: () => void;
+  onHashShelf: () => void;
 }) {
   return (
     <aside className="sidebar">
@@ -1040,6 +1147,17 @@ function Sidebar({
           </button>
         ))}
       </section>
+      <StashShelf
+        items={stashItems}
+        canAddSelection={canAddSelection}
+        onAddSelection={onAddSelectionToShelf}
+        onPreviewItem={onPreviewShelfItem}
+        onRemoveItem={onRemoveShelfItem}
+        onClear={onClearShelf}
+        onCopy={onCopyShelf}
+        onMove={onMoveShelf}
+        onHash={onHashShelf}
+      />
       <section>
         <h2>Bookmarks</h2>
         {bookmarks.length === 0 && <p className="empty-note">Add current pane folders with the star button.</p>}
@@ -1053,6 +1171,60 @@ function Sidebar({
         ))}
       </section>
     </aside>
+  );
+}
+
+function StashShelf({
+  items,
+  canAddSelection,
+  onAddSelection,
+  onPreviewItem,
+  onRemoveItem,
+  onClear,
+  onCopy,
+  onMove,
+  onHash
+}: {
+  items: StashShelfItem[];
+  canAddSelection: boolean;
+  onAddSelection: () => void;
+  onPreviewItem: (path: string) => void;
+  onRemoveItem: (path: string) => void;
+  onClear: () => void;
+  onCopy: () => void;
+  onMove: () => void;
+  onHash: () => void;
+}) {
+  const fileCount = items.filter((item) => !item.isDirectory).length;
+  return (
+    <section className="stash-section" aria-label="Stash Shelf">
+      <div className="section-heading-row">
+        <h2>Stash Shelf</h2>
+        <span>{items.length}</span>
+      </div>
+      <div className="stash-actions">
+        <button onClick={onAddSelection} disabled={!canAddSelection}>Add</button>
+        <button onClick={onCopy} disabled={!items.length}>Copy</button>
+        <button onClick={onMove} disabled={!items.length}>Move</button>
+        <button onClick={onHash} disabled={!fileCount}>Hash</button>
+        <button onClick={onClear} disabled={!items.length}>Clear</button>
+      </div>
+      {items.length === 0 && <p className="empty-note">Collect files from any pane, then copy or move them together.</p>}
+      <div className="stash-list">
+        {items.map((item) => (
+          <div key={item.path} className="stash-row">
+            <button className="stash-item" title={item.path} onClick={() => onPreviewItem(item.path)}>
+              {item.isDirectory ? <Folder size={15} /> : <File size={15} />}
+              <span>{item.label}</span>
+              <small>{item.isDirectory ? "Folder" : formatBytes(item.size)}</small>
+            </button>
+            <button className="ghost-mini" title="Remove from shelf" onClick={() => onRemoveItem(item.path)}>
+              x
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1945,6 +2117,7 @@ function ContextMenu({
   onRename,
   onDelete,
   onHash,
+  onAddToShelf,
   onReveal,
   canPaste,
   canAct
@@ -1956,6 +2129,7 @@ function ContextMenu({
   onRename: () => void;
   onDelete: () => void;
   onHash: () => void;
+  onAddToShelf: () => void;
   onReveal: () => void;
   canPaste: boolean;
   canAct: boolean;
@@ -1968,6 +2142,7 @@ function ContextMenu({
       <button disabled={!canAct} onClick={onRename}>Rename</button>
       <button disabled={!canAct} onClick={onDelete}>Delete</button>
       <button disabled={!canAct} onClick={onHash}>Calculate SHA-256</button>
+      <button disabled={!canAct} onClick={onAddToShelf}>Add to Shelf</button>
       <button disabled={!canAct} onClick={onReveal}>Reveal in Explorer</button>
     </div>
   );

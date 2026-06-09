@@ -46,6 +46,14 @@ export interface KnownLocation {
   icon: string;
 }
 
+export interface StashShelfItem {
+  path: string;
+  label: string;
+  isDirectory: boolean;
+  size: number;
+  addedAt: number;
+}
+
 export interface BootstrapPayload {
   homePath: string;
   knownLocations: KnownLocation[];
@@ -78,6 +86,7 @@ export interface WorkspaceSnapshot {
   activePaneId: number;
   panes: WorkspacePaneSnapshot[];
   bookmarks: KnownLocation[];
+  stashItems?: StashShelfItem[];
   savedAt: number;
 }
 
