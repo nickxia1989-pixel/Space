@@ -306,6 +306,29 @@ describe("App", () => {
     promptSpy.mockRestore();
   });
 
+  it("recovers panes that are showing a deleted folder", async () => {
+    const user = userEvent.setup();
+    const homePath = "C:\\Users\\Traveler";
+    const desktopPath = `${homePath}\\Desktop`;
+    writeWorkspaceWithPanePaths([homePath, desktopPath, `${homePath}\\Downloads`, `${homePath}\\Documents`]);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Desktop"));
+    await user.click(screen.getByLabelText("Delete"));
+
+    expect(await screen.findByText("Deleted 1 item(s).")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane2).getByDisplayValue(homePath)).toBeInTheDocument());
+    expect(within(pane2).queryByText("Todo.txt")).not.toBeInTheDocument();
+    expect(pane1).toHaveClass("active");
+    confirmSpy.mockRestore();
+  });
+
   it("opens advanced batch rename and folder sync panels", async () => {
     const user = userEvent.setup();
     render(<App />);

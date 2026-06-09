@@ -49,7 +49,8 @@ import {
   formatBytes,
   formatDate,
   parentPath,
-  pathName
+  pathName,
+  trimTrailingSeparator
 } from "./pathUtils";
 import type {
   BootstrapPayload,
@@ -859,8 +860,23 @@ export default function App() {
     return panes.filter((pane) => pathKeys.has(pane.path.toLowerCase())).map((pane) => pane.id);
   }
 
+  function sameOrChildPath(candidate: string, parent: string): boolean {
+    const normalizedCandidate = trimTrailingSeparator(candidate).replace(/[\\/]+/g, "\\").toLowerCase();
+    const normalizedParent = trimTrailingSeparator(parent).replace(/[\\/]+/g, "\\").toLowerCase();
+    return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}\\`);
+  }
+
   function operationRefreshIds(baseIds: number[], paths: string[]): number[] {
     return [...new Set([...baseIds, ...paneIdsForPaths(paths)])];
+  }
+
+  function deletedPathRecoveryTargets(paths: string[]): Array<{ paneId: number; fallbackPath: string }> {
+    return panes.flatMap((pane) => {
+      const deletedRoot = paths
+        .filter((path) => sameOrChildPath(pane.path, path))
+        .sort((left, right) => right.length - left.length)[0];
+      return deletedRoot ? [{ paneId: pane.id, fallbackPath: parentPath(deletedRoot) }] : [];
+    });
   }
 
   function nextPaneLoadRequest(paneId: number): number {
@@ -1161,9 +1177,9 @@ export default function App() {
     showToast("success", "Workspace deleted.");
   }
 
-  async function loadPane(paneId: number, targetPath: string, mode: "push" | "replace" = "push") {
+  async function loadPane(paneId: number, targetPath: string, mode: "push" | "replace" = "push", activate = true) {
     const requestId = nextPaneLoadRequest(paneId);
-    setActivePaneId(paneId);
+    if (activate) setActivePaneId(paneId);
     clearAddressSuggestions(paneId);
     updatePane(paneId, (pane) => ({ ...pane, loading: true, error: undefined, addressDraft: targetPath }));
     try {
@@ -1480,9 +1496,15 @@ export default function App() {
     const pane = paneById(paneId);
     if (!pane?.selectedPaths.length) return;
     const selectedPaths = [...pane.selectedPaths];
+    const recoveryTargets = deletedPathRecoveryTargets(selectedPaths);
+    const recoveryPaneIds = new Set(recoveryTargets.map((target) => target.paneId));
+    const refreshIds = operationRefreshIds([pane.id], selectedPaths.map(parentPath)).filter((id) => !recoveryPaneIds.has(id));
     const ok = window.confirm(`Delete ${selectedPaths.length} selected item(s)?`);
     if (!ok) return;
-    await perform("Delete", () => api.deleteItems({ paths: selectedPaths }), operationRefreshIds([pane.id], selectedPaths.map(parentPath)));
+    const succeeded = await perform("Delete", () => api.deleteItems({ paths: selectedPaths }), refreshIds);
+    if (succeeded) {
+      await Promise.all(recoveryTargets.map((target) => loadPane(target.paneId, target.fallbackPath, "replace", false)));
+    }
   }
 
   async function calculateSelectedHash(algorithm: HashAlgorithm = "sha256", paneId = activePaneId) {
