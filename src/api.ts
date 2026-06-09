@@ -205,6 +205,32 @@ function removeMockEntry(sourcePath: string): FileEntry {
   return entry;
 }
 
+function renameMockEntryTree(entry: FileEntry, targetPath: string): FileEntry {
+  const renamed: FileEntry = {
+    ...entry,
+    name: pathName(targetPath),
+    path: targetPath,
+    parentPath: parentPath(targetPath),
+    modifiedAt: Date.now()
+  };
+  if (entry.isDirectory) {
+    const renamedChildren = (mockEntries.get(entry.path) ?? []).map((child) =>
+      renameMockEntryTree(child, mockJoin(targetPath, child.name))
+    );
+    mockEntries.delete(entry.path);
+    mockEntries.set(targetPath, renamedChildren);
+  }
+  return renamed;
+}
+
+function deleteMockEntryTree(entry: FileEntry): void {
+  if (!entry.isDirectory) return;
+  for (const child of mockEntries.get(entry.path) ?? []) {
+    deleteMockEntryTree(child);
+  }
+  mockEntries.delete(entry.path);
+}
+
 function mockUniqueTargetPath(targetPath: string): string {
   if (!mockPathExists(targetPath)) return targetPath;
   const parent = parentPath(targetPath);
@@ -315,20 +341,19 @@ function createBrowserMockApi(): SpaceApi {
     },
     async renameItem(request: RenameRequest) {
       const parent = parentPath(request.path);
-      const entries = mockEntries.get(parent) ?? [];
-      const target = entries.find((entry) => entry.path === request.path);
-      if (!target) throw new Error("Item not found.");
-      target.name = request.newName;
-      target.path = `${parent}\\${request.newName}`;
-      return target;
+      const targetPath = mockJoin(parent, request.newName);
+      if (!mockPathEquals(request.path, targetPath) && mockPathExists(targetPath)) {
+        throw new Error("A file or folder with that name already exists.");
+      }
+      const entry = removeMockEntry(request.path);
+      const renamed = renameMockEntryTree(entry, targetPath);
+      addMockEntry(parent, renamed);
+      return renamed;
     },
     async deleteItems(request: DeleteRequest) {
       for (const source of request.paths) {
-        const parent = parentPath(source);
-        mockEntries.set(
-          parent,
-          (mockEntries.get(parent) ?? []).filter((entry) => entry.path !== source)
-        );
+        const entry = removeMockEntry(source);
+        deleteMockEntryTree(entry);
       }
       return mockResult(`Deleted ${request.paths.length} item(s).`, request.paths);
     },
