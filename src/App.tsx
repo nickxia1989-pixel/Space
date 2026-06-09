@@ -845,6 +845,14 @@ export default function App() {
     : [];
   const previewTarget = previewPath ?? selectedEntries[0]?.path;
 
+  function paneById(paneId: number): PaneState | undefined {
+    return panes.find((pane) => pane.id === paneId);
+  }
+
+  function selectedEntriesForPane(pane: PaneState | undefined): FileEntry[] {
+    return pane ? pane.entries.filter((entry) => containsPath(pane.selectedPaths, entry.path)) : [];
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1316,15 +1324,17 @@ export default function App() {
     }
   }
 
-  function copySelection(mode: ClipboardMode) {
-    if (!activePane?.selectedPaths.length) return;
-    setClipboard({ mode, paths: activePane.selectedPaths });
-    showToast("info", `${mode === "copy" ? "Copied" : "Cut"} ${activePane.selectedPaths.length} item(s).`);
+  function copySelection(mode: ClipboardMode, paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane?.selectedPaths.length) return;
+    setClipboard({ mode, paths: [...pane.selectedPaths] });
+    showToast("info", `${mode === "copy" ? "Copied" : "Cut"} ${pane.selectedPaths.length} item(s).`);
   }
 
-  async function copySelectedPaths() {
-    if (!activePane?.selectedPaths.length) return;
-    const paths = [...activePane.selectedPaths];
+  async function copySelectedPaths(paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane?.selectedPaths.length) return;
+    const paths = [...pane.selectedPaths];
     try {
       const result = await api.copyTextToClipboard(paths.join("\r\n"));
       if (!result.ok) throw new Error(result.message);
@@ -1334,14 +1344,16 @@ export default function App() {
     }
   }
 
-  function selectSameType() {
-    if (!activePane || selectedEntries.length === 0) return;
-    const keys = new Set(selectedEntries.map(typeSelectionKey));
-    const matches = visibleEntries(activePane).filter((entry) => keys.has(typeSelectionKey(entry)));
-    updatePane(activePane.id, (pane) => ({
-      ...pane,
+  function selectSameType(paneId = activePaneId) {
+    const pane = paneById(paneId);
+    const selected = selectedEntriesForPane(pane);
+    if (!pane || selected.length === 0) return;
+    const keys = new Set(selected.map(typeSelectionKey));
+    const matches = visibleEntries(pane).filter((entry) => keys.has(typeSelectionKey(entry)));
+    updatePane(pane.id, (current) => ({
+      ...current,
       selectedPaths: matches.map((entry) => entry.path),
-      anchorPath: matches[0]?.path ?? pane.anchorPath
+      anchorPath: matches[0]?.path ?? current.anchorPath
     }));
     showToast("info", `Selected ${matches.length} same type item(s).`);
   }
@@ -1412,25 +1424,29 @@ export default function App() {
     }
   }
 
-  async function renameSelected() {
-    if (!activePane || activePane.selectedPaths.length !== 1) return;
-    const sourcePath = activePane.selectedPaths[0];
+  async function renameSelected(paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane || pane.selectedPaths.length !== 1) return;
+    const sourcePath = pane.selectedPaths[0];
     const name = window.prompt("Rename", pathName(sourcePath));
     if (!name) return;
-    await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }));
+    await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), [pane.id]);
   }
 
-  async function deleteSelected() {
-    if (!activePane?.selectedPaths.length) return;
-    const ok = window.confirm(`Delete ${activePane.selectedPaths.length} selected item(s)?`);
+  async function deleteSelected(paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane?.selectedPaths.length) return;
+    const selectedPaths = [...pane.selectedPaths];
+    const ok = window.confirm(`Delete ${selectedPaths.length} selected item(s)?`);
     if (!ok) return;
-    await perform("Delete", () => api.deleteItems({ paths: activePane.selectedPaths }));
+    await perform("Delete", () => api.deleteItems({ paths: selectedPaths }), [pane.id]);
   }
 
-  async function calculateSelectedHash(algorithm: HashAlgorithm = "sha256") {
-    if (!activePane || activePane.selectedPaths.length !== 1) return;
+  async function calculateSelectedHash(algorithm: HashAlgorithm = "sha256", paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane || pane.selectedPaths.length !== 1) return;
     try {
-      const result = await api.calculateHash({ path: activePane.selectedPaths[0], algorithm });
+      const result = await api.calculateHash({ path: pane.selectedPaths[0], algorithm });
       setHashLine(`${algorithm.toUpperCase()} ${pathName(result.path)}: ${result.value}`);
       showToast("success", "Hash calculated.");
     } catch (error) {
@@ -1516,10 +1532,11 @@ export default function App() {
     }
   }
 
-  function addSelectionToShelf() {
-    if (!activePane?.selectedPaths.length) return;
-    const entryByPath = new Map(activePane.entries.map((entry) => [entry.path.toLowerCase(), entry]));
-    const additions = activePane.selectedPaths.map((sourcePath) => {
+  function addSelectionToShelf(paneId = activePaneId) {
+    const pane = paneById(paneId);
+    if (!pane?.selectedPaths.length) return;
+    const entryByPath = new Map(pane.entries.map((entry) => [entry.path.toLowerCase(), entry]));
+    const additions = pane.selectedPaths.map((sourcePath) => {
       const entry = entryByPath.get(sourcePath.toLowerCase());
       return {
         path: sourcePath,
@@ -1926,16 +1943,19 @@ export default function App() {
         <ContextMenu
           state={contextMenu}
           actionIds={contextMenuActionIds}
-          onCopy={() => copySelection("copy")}
-          onCopyPaths={() => void copySelectedPaths()}
-          onSelectSameType={selectSameType}
-          onCut={() => copySelection("cut")}
+          onCopy={() => copySelection("copy", contextMenu.paneId)}
+          onCopyPaths={() => void copySelectedPaths(contextMenu.paneId)}
+          onSelectSameType={() => selectSameType(contextMenu.paneId)}
+          onCut={() => copySelection("cut", contextMenu.paneId)}
           onPaste={() => void pasteInto(contextMenu.paneId)}
-          onRename={() => void renameSelected()}
-          onDelete={() => void deleteSelected()}
-          onHash={() => void calculateSelectedHash("sha256")}
-          onAddToShelf={addSelectionToShelf}
-          onReveal={() => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), [])}
+          onRename={() => void renameSelected(contextMenu.paneId)}
+          onDelete={() => void deleteSelected(contextMenu.paneId)}
+          onHash={() => void calculateSelectedHash("sha256", contextMenu.paneId)}
+          onAddToShelf={() => addSelectionToShelf(contextMenu.paneId)}
+          onReveal={() => {
+            const pane = paneById(contextMenu.paneId);
+            if (pane?.selectedPaths[0]) void perform("Reveal", () => api.revealPath(pane.selectedPaths[0]), []);
+          }}
           onOpenTerminal={() => {
             const pane = panes.find((item) => item.id === contextMenu.paneId);
             if (pane) void perform("Terminal", () => api.openTerminal(pane.path), []);
@@ -1946,8 +1966,8 @@ export default function App() {
             setQuickLaunchMenuOpen(true);
           }}
           canPaste={!!clipboard?.paths.length}
-          canAct={!!activePane?.selectedPaths.length}
-          canSelectSameType={selectedEntries.length > 0}
+          canAct={!!paneById(contextMenu.paneId)?.selectedPaths.length}
+          canSelectSameType={selectedEntriesForPane(paneById(contextMenu.paneId)).length > 0}
         />
       )}
 

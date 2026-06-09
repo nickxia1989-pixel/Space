@@ -278,6 +278,28 @@ describe("App", () => {
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
   });
 
+  it("applies context menu file actions to the pane that opened the menu", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed Todo.txt");
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Space Notes.md"));
+    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"));
+    const contextMenu = document.querySelector(".context-menu");
+    expect(contextMenu).not.toBeNull();
+    await user.click(within(contextMenu as HTMLElement).getByRole("button", { name: "Rename" }));
+
+    expect(await within(pane2).findByText("Renamed Todo.txt")).toBeInTheDocument();
+    expect(within(pane2).queryByText("Todo.txt")).not.toBeInTheDocument();
+    expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
+    promptSpy.mockRestore();
+  });
+
   it("saves and loads batch rename presets", async () => {
     const user = userEvent.setup();
     render(<App />);
