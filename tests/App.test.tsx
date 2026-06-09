@@ -355,6 +355,31 @@ describe("App", () => {
     expect(pane3).toHaveClass("active");
   });
 
+  it("recovers panes that are showing a renamed folder", async () => {
+    const user = userEvent.setup();
+    const homePath = "C:\\Users\\Traveler";
+    const desktopPath = `${homePath}\\Desktop`;
+    writeWorkspaceWithPanePaths([homePath, desktopPath, `${homePath}\\Downloads`, `${homePath}\\Documents`]);
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Projects");
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Desktop"));
+    const shell = screen.getByText("Four-pane file manager").closest("main");
+    expect(shell).not.toBeNull();
+    fireEvent.keyDown(shell!, { key: "F2" });
+
+    expect(await screen.findByText("Rename complete.")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane2).getByDisplayValue(`${homePath}\\Projects`)).toBeInTheDocument());
+    expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument();
+    expect(pane1).toHaveClass("active");
+    promptSpy.mockRestore();
+  });
+
   it("opens advanced batch rename and folder sync panels", async () => {
     const user = userEvent.setup();
     render(<App />);

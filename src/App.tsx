@@ -907,8 +907,8 @@ export default function App() {
     });
   }
 
-  async function recoverMovedPanes(sources: string[], destination: string, result: OperationResult | true): Promise<void> {
-    if (result === true || !result.affectedPaths?.length) return;
+  async function recoverMovedPanes(sources: string[], destination: string, result: OperationResult | FileEntry | true): Promise<void> {
+    if (result === true || !("affectedPaths" in result) || !result.affectedPaths?.length) return;
     const moves = movedPathPairs(sources, destination, result.affectedPaths);
     if (!moves.length) return;
     await Promise.all(movedPathRecoveryTargets(moves).map((target) => loadPane(target.paneId, target.targetPath, "replace", false)));
@@ -1330,7 +1330,7 @@ export default function App() {
     label: string,
     action: () => Promise<OperationResult | unknown>,
     refreshIds: number[] = [activePaneId]
-  ): Promise<OperationResult | true | null> {
+  ): Promise<OperationResult | FileEntry | true | null> {
     try {
       const result = await action();
       const message =
@@ -1339,7 +1339,9 @@ export default function App() {
           : `${label} complete.`;
       showToast("success", message);
       await Promise.all([...new Set(refreshIds)].map((id) => refreshPane(id, false)));
-      return typeof result === "object" && result && "message" in result ? (result as OperationResult) : true;
+      if (typeof result === "object" && result && "message" in result) return result as OperationResult;
+      if (typeof result === "object" && result && "path" in result) return result as FileEntry;
+      return true;
     } catch (error) {
       showToast("error", `${label} failed: ${getErrorMessage(error)}`);
       return null;
@@ -1532,7 +1534,10 @@ export default function App() {
     const refreshIds = operationRefreshIds([pane.id], [parentPath(sourcePath)]);
     const name = window.prompt("Rename", pathName(sourcePath));
     if (!name) return;
-    await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), refreshIds);
+    const result = await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), refreshIds);
+    if (result && result !== true && "path" in result) {
+      await Promise.all(movedPathRecoveryTargets([{ sourcePath, targetPath: result.path }]).map((target) => loadPane(target.paneId, target.targetPath, "replace", false)));
+    }
   }
 
   async function deleteSelected(paneId = activePaneId) {
