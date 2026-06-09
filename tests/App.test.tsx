@@ -78,6 +78,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Workspace search")).toBeInTheDocument());
+    expect(screen.getByLabelText("Hash compare")).toBeInTheDocument();
   });
 
   it("supports switching an individual pane to icon view", async () => {
@@ -139,6 +140,23 @@ describe("App", () => {
     await user.click(within(dialog).getByRole("button", { name: "Shelf Archive.tar" }));
     expect(await screen.findByText("Added 1 item(s) to shelf.")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Stash Shelf" })).getByText("Archive.tar")).toBeInTheDocument();
+  });
+
+  it("compares selected file hashes", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
+    await user.click(screen.getByText("Archive.zip"));
+    fireEvent.click(screen.getByText("Archive.tar"), { ctrlKey: true });
+    await user.click(screen.getByLabelText("Hash compare"));
+
+    const dialog = screen.getByRole("dialog", { name: "Hash compare" });
+    await user.click(within(dialog).getByRole("button", { name: "Calculate" }));
+
+    expect(await within(dialog).findByText(/1 matching group/)).toBeInTheDocument();
+    expect(within(dialog).getByText("2 matching files")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("mock-hash-value").length).toBeGreaterThan(0);
   });
 
   it("saves and loads batch rename presets", async () => {

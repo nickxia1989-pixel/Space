@@ -14,6 +14,7 @@ import {
   FolderPlus,
   Grid2X2,
   HardDrive,
+  Hash as HashIcon,
   Home,
   Image,
   LayoutGrid,
@@ -124,6 +125,12 @@ interface WorkspaceSearchResult {
   sourceLabels: string[];
 }
 
+interface HashCompareResult {
+  entry: FileEntry;
+  value?: string;
+  error?: string;
+}
+
 const paneIds = [1, 2, 3, 4];
 const sortLabels: Record<SortKey, string> = {
   name: "Name",
@@ -166,7 +173,8 @@ const defaultBatchRenameRule: BatchRenameRule = {
 };
 
 const maxBatchRenameHistory = 50;
-const currentActionLayoutVersion = 2;
+const currentActionLayoutVersion = 3;
+const hashAlgorithms: HashAlgorithm[] = ["sha256", "md5", "sha1", "sha512"];
 
 const defaultToolbarActionIds = [
   "newFolder",
@@ -179,6 +187,7 @@ const defaultToolbarActionIds = [
   "batchRename",
   "folderSync",
   "addShelf",
+  "hashCompare",
   "colorRules",
   "quickLaunch",
   "workspaceSearch",
@@ -209,6 +218,7 @@ const toolbarActionCatalog = [
   { id: "batchRename", label: "Batch Rename" },
   { id: "folderSync", label: "Folder Sync" },
   { id: "addShelf", label: "Add To Shelf" },
+  { id: "hashCompare", label: "Hash Compare" },
   { id: "colorRules", label: "Color Rules" },
   { id: "quickLaunch", label: "Quick Launch" },
   { id: "workspaceSearch", label: "Workspace Search" },
@@ -689,6 +699,7 @@ export default function App() {
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
+  const [hashCompareOpen, setHashCompareOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
   const toastCounter = useRef(0);
 
@@ -1497,6 +1508,13 @@ export default function App() {
     batchRename: { title: "Batch rename", icon: FileText, onClick: () => setBatchRenameOpen(true), disabled: !activePane?.selectedPaths.length },
     folderSync: { title: "Folder sync", icon: RefreshCcw, onClick: () => setFolderSyncOpen(true), disabled: !activePane },
     addShelf: { title: "Add selection to shelf", icon: Plus, onClick: addSelectionToShelf, disabled: !activePane?.selectedPaths.length },
+    hashCompare: {
+      title: "Hash compare",
+      icon: HashIcon,
+      onClick: () => setHashCompareOpen(true),
+      disabled: !selectedEntries.some((entry) => entry.isFile),
+      active: hashCompareOpen
+    },
     colorRules: { title: "Color rules", icon: Palette, onClick: () => setColorRulesOpen(true), active: colorRules.some((rule) => rule.enabled) },
     quickLaunch: {
       title: "Quick launch",
@@ -1782,6 +1800,14 @@ export default function App() {
           onOpen={(entry) => void openWorkspaceSearchResult(entry)}
           onReveal={(entry) => void perform("Reveal", () => api.revealPath(entry.path), [])}
           onAddToShelf={addFileEntryToShelf}
+        />
+      )}
+
+      {hashCompareOpen && (
+        <HashCompareModal
+          api={api}
+          entries={selectedEntries.filter((entry) => entry.isFile)}
+          onClose={() => setHashCompareOpen(false)}
         />
       )}
 
@@ -2590,6 +2616,163 @@ function Inspector({
         </>
       )}
     </aside>
+  );
+}
+
+function HashCompareModal({
+  api,
+  entries,
+  onClose
+}: {
+  api: SpaceApi;
+  entries: FileEntry[];
+  onClose: () => void;
+}) {
+  const [algorithm, setAlgorithm] = useState<HashAlgorithm>("sha256");
+  const [results, setResults] = useState<HashCompareResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [calculated, setCalculated] = useState(false);
+  const [error, setError] = useState("");
+  const files = useMemo(() => {
+    const seen = new Set<string>();
+    return entries.filter((entry) => {
+      const key = entry.path.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [entries]);
+
+  const groups = useMemo(() => {
+    const grouped = new Map<string, HashCompareResult[]>();
+    for (const result of results) {
+      if (!result.value) continue;
+      grouped.set(result.value, [...(grouped.get(result.value) ?? []), result]);
+    }
+    return [...grouped.entries()]
+      .map(([value, items]) => ({ value, items }))
+      .sort((a, b) => b.items.length - a.items.length || a.value.localeCompare(b.value));
+  }, [results]);
+  const duplicateGroups = groups.filter((group) => group.items.length > 1);
+  const uniqueGroups = groups.filter((group) => group.items.length === 1);
+  const failedResults = results.filter((result) => result.error);
+
+  async function calculate() {
+    if (files.length === 0) {
+      setError("Select one or more files to compare.");
+      return;
+    }
+    setLoading(true);
+    setCalculated(true);
+    setError("");
+    const nextResults = await Promise.all(
+      files.map(async (entry) => {
+        try {
+          const payload = await api.calculateHash({ path: entry.path, algorithm });
+          return { entry, value: payload.value };
+        } catch (caught) {
+          return { entry, error: getErrorMessage(caught) };
+        }
+      })
+    );
+    setResults(nextResults);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    setResults([]);
+    setCalculated(false);
+    setError("");
+  }, [algorithm, files]);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal hash-compare-modal" role="dialog" aria-modal="true" aria-label="Hash compare">
+        <header className="modal-header">
+          <div>
+            <h2>Hash Compare</h2>
+            <span>{files.length} selected file(s)</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="hash-compare-toolbar">
+          <label>
+            Algorithm
+            <select value={algorithm} onChange={(event) => setAlgorithm(event.target.value as HashAlgorithm)}>
+              {hashAlgorithms.map((item) => (
+                <option key={item} value={item}>
+                  {item.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="primary" onClick={() => void calculate()} disabled={loading || files.length === 0}>
+            Calculate
+          </button>
+          <span>
+            {loading
+              ? "Calculating..."
+              : calculated
+                ? `${duplicateGroups.length} matching group(s) · ${uniqueGroups.length} unique file(s)`
+                : "Ready"}
+          </span>
+        </div>
+
+        {error && <p className="modal-error">{error}</p>}
+
+        <div className="hash-compare-results">
+          {!calculated && <p className="empty-folder">Choose an algorithm and calculate selected file hashes.</p>}
+          {duplicateGroups.map((group) => (
+            <section className="hash-group duplicate" key={group.value}>
+              <div className="hash-group-header">
+                <strong>{group.items.length} matching files</strong>
+                <code>{group.value}</code>
+              </div>
+              {group.items.map((result) => (
+                <HashCompareRow key={result.entry.path} result={result} />
+              ))}
+            </section>
+          ))}
+          {uniqueGroups.length > 0 && (
+            <section className="hash-group">
+              <div className="hash-group-header">
+                <strong>{uniqueGroups.length} unique file(s)</strong>
+                <span>{algorithm.toUpperCase()}</span>
+              </div>
+              {uniqueGroups.map((group) => (
+                <HashCompareRow key={group.items[0].entry.path} result={group.items[0]} hashValue={group.value} />
+              ))}
+            </section>
+          )}
+          {failedResults.length > 0 && (
+            <section className="hash-group failed">
+              <div className="hash-group-header">
+                <strong>{failedResults.length} failed item(s)</strong>
+                <span>Skipped</span>
+              </div>
+              {failedResults.map((result) => (
+                <HashCompareRow key={result.entry.path} result={result} />
+              ))}
+            </section>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HashCompareRow({ result, hashValue }: { result: HashCompareResult; hashValue?: string }) {
+  return (
+    <div className="hash-row">
+      <span className="file-name-cell">
+        <File size={16} />
+        <span>{result.entry.name}</span>
+      </span>
+      <span title={result.entry.parentPath}>{result.entry.parentPath}</span>
+      <span>{formatBytes(result.entry.size)}</span>
+      <code title={result.error ?? result.value ?? hashValue}>{result.error ?? result.value ?? hashValue}</code>
+    </div>
   );
 }
 

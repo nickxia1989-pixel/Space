@@ -16,6 +16,7 @@
 | Cross-pane transfer commands | Renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
 | Workspace Search | `tests/App.test.tsx` workspace search modal coverage with de-duplicated mock results and Stash Shelf action |
+| Hash Compare | `tests/App.test.tsx` selected-file hash comparison modal coverage; `tests/fileService.test.ts` hash calculation coverage |
 | Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage; `tests/App.test.tsx` preset save/load/delete and history record/clear coverage |
 | Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage; `tests/App.test.tsx` sync preset save/load/delete coverage |
 | Workspace tabs and persistence | `tests/App.test.tsx`; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
@@ -53,17 +54,18 @@ Expected result: all commands exit with code `0`.
 9. Filter a pane by keyword and run recursive search with `Subfolders` checked.
 10. Open Workspace Search, search across the current pane roots, confirm duplicate paths collapse to one row, open a file result, reveal a result, and add a result to Stash Shelf.
 11. Select a text or image file and verify the inspector preview, metadata, reveal action, and SHA-256 action.
-12. Select multiple files, open Batch Rename, save a reusable preset, load it again, delete it, confirm preview status, apply, verify renamed files appear in the pane, and confirm the operation appears in Rename History.
-13. Open two folders in separate panes, use Folder Sync, save a reusable preset, load it again, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
-14. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
-15. Select files in multiple panes, add them to Stash Shelf, preview a shelf item, copy the shelf to the active pane, move another shelf batch to the active pane, remove one shelf item, clear the shelf, and calculate SHA-256 for staged files.
-16. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all. Also double-click existing `.tar`, `.tgz`, or `.tar.gz` archives and verify browsing, text/image preview, selected extraction, and extract-all.
-17. Open Color Rules, add a rule for `.zip` files, save it, and confirm matching entries are highlighted in details view and icon view without changing selection behavior.
-18. Open Quick Launch, run the default PowerShell item from a pane, add a custom command/app/shortcut item, use `{currentPath}` and `{selectedPaths}`, save, and confirm it appears in the Quick Launch panel.
-19. Open Customize Actions, hide and reorder toolbar actions, save, and verify the toolbar updates; customize the Context Menu and verify right-click actions follow the saved layout.
-20. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, batch rename presets/history, folder sync presets, and action layout are restored.
-21. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
-22. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
+12. Select two or more files, open Hash Compare, switch algorithms, calculate hashes, and confirm matching hashes are grouped while unique files remain separate.
+13. Select multiple files, open Batch Rename, save a reusable preset, load it again, delete it, confirm preview status, apply, verify renamed files appear in the pane, and confirm the operation appears in Rename History.
+14. Open two folders in separate panes, use Folder Sync, save a reusable preset, load it again, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
+15. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
+16. Select files in multiple panes, add them to Stash Shelf, preview a shelf item, copy the shelf to the active pane, move another shelf batch to the active pane, remove one shelf item, clear the shelf, and calculate SHA-256 for staged files.
+17. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all. Also double-click existing `.tar`, `.tgz`, or `.tar.gz` archives and verify browsing, text/image preview, selected extraction, and extract-all.
+18. Open Color Rules, add a rule for `.zip` files, save it, and confirm matching entries are highlighted in details view and icon view without changing selection behavior.
+19. Open Quick Launch, run the default PowerShell item from a pane, add a custom command/app/shortcut item, use `{currentPath}` and `{selectedPaths}`, save, and confirm it appears in the Quick Launch panel.
+20. Open Customize Actions, hide and reorder toolbar actions, save, and verify the toolbar updates; customize the Context Menu and verify right-click actions follow the saved layout.
+21. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, batch rename presets/history, folder sync presets, and action layout are restored.
+22. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
+23. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
 ## Browser Renderer Checks
 
@@ -86,6 +88,7 @@ Open `http://127.0.0.1:5188/` and verify:
 - The Customize Actions panel can hide a toolbar action and remove a context-menu action.
 - Filtering `Space` in pane 1 reduces the mock result set.
 - Workspace Search for `Archive` returns `Archive.zip` and `Archive.tar`, and Shelf adds one result without duplicating repeated pane roots.
+- Selecting `Archive.zip` and `Archive.tar`, then running Hash Compare, shows one matching mock hash group.
 - Adding `Space Notes.md` to Stash Shelf shows it in the left sidebar and Hash reports a shelf SHA-256 line.
 - No console `error` or `warning` entries appear.
 

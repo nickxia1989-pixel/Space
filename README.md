@@ -18,6 +18,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Quick Launch: per-workspace launch items run apps, command lines, or shortcuts from the active pane with variables for current path and selected files.
 - Custom Actions: per-workspace toolbar and context menu actions can be shown, hidden, reordered, and restored to defaults.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
+- Hash Compare: calculate MD5, SHA-1, SHA-256, or SHA-512 for selected files and group matching hashes to verify duplicates or copied files.
 - Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, reusable workspace presets, apply, and per-workspace rename history.
 - Folder sync: compare two folders, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, save reusable workspace presets, and execute the sync.
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.

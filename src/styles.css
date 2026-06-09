@@ -927,6 +927,112 @@ button:disabled {
   word-break: break-all;
 }
 
+.hash-compare-modal {
+  width: min(1080px, 100%);
+}
+
+.hash-compare-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hash-compare-toolbar label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #8f9db2;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.hash-compare-toolbar select {
+  height: 30px;
+  padding: 0 8px;
+}
+
+.hash-compare-toolbar > span {
+  min-width: 0;
+  overflow: hidden;
+  color: #cfeae3;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hash-compare-results {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px 16px;
+}
+
+.hash-group {
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.hash-group.duplicate {
+  border-color: rgba(158, 231, 215, 0.32);
+}
+
+.hash-group.failed {
+  border-color: rgba(255, 128, 118, 0.36);
+}
+
+.hash-group-header,
+.hash-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.95fr) minmax(180px, 1fr) 90px minmax(260px, 1.2fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.hash-group-header {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #cfeae3;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+}
+
+.hash-group-header code,
+.hash-group-header span {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: #8f9db2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hash-row {
+  min-height: 36px;
+  padding: 0 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  color: #dde7f5;
+  font-size: 12px;
+}
+
+.hash-row > span,
+.hash-row code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hash-row code {
+  color: #b7f0e6;
+  font-size: 11px;
+}
+
 .context-menu {
   position: fixed;
   z-index: 20;
@@ -1850,5 +1956,17 @@ button:disabled {
 
   .workspace-search-actions {
     justify-content: flex-start;
+  }
+
+  .hash-compare-toolbar,
+  .hash-group-header,
+  .hash-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .hash-group-header code,
+  .hash-group-header span {
+    grid-column: auto;
   }
 }
