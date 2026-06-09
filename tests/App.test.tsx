@@ -9,6 +9,58 @@ function readSavedWorkspace(): WorkspaceDocument | null {
   return raw ? (JSON.parse(raw) as WorkspaceDocument) : null;
 }
 
+function writeLegacyActionWorkspace(): void {
+  const homePath = "C:\\Users\\Traveler";
+  const panePaths = [
+    homePath,
+    `${homePath}\\Desktop`,
+    `${homePath}\\Downloads`,
+    `${homePath}\\Pictures`
+  ];
+  const document: WorkspaceDocument = {
+    activeWorkspaceId: "default",
+    workspaces: [
+      {
+        id: "default",
+        name: "Default",
+        layout: "grid",
+        activePaneId: 1,
+        panes: panePaths.map((panePath, index) => ({
+          id: index + 1,
+          path: panePath,
+          history: [panePath],
+          historyIndex: 0,
+          sortKey: "name",
+          sortDirection: "asc",
+          viewMode: "details"
+        })),
+        bookmarks: [],
+        toolbarActionIds: [
+          "newFolder",
+          "newFile",
+          "copy",
+          "cut",
+          "paste",
+          "delete",
+          "createZip",
+          "batchRename",
+          "folderSync",
+          "addShelf",
+          "colorRules",
+          "quickLaunch",
+          "refresh",
+          "terminal",
+          "bookmark"
+        ],
+        contextMenuActionIds: ["copy", "cut", "paste", "rename", "delete", "hash", "addShelf", "quickLaunch", "terminal", "reveal"],
+        savedAt: 1
+      }
+    ],
+    savedAt: 1
+  };
+  window.localStorage.setItem("space.mock.workspace", JSON.stringify(document));
+}
+
 describe("App", () => {
   it("renders four explorer panes with default controls", async () => {
     render(<App />);
@@ -19,6 +71,13 @@ describe("App", () => {
     expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 4")).toBeInTheDocument();
     expect(screen.getAllByPlaceholderText("Filter or search")).toHaveLength(4);
+  });
+
+  it("migrates legacy action layouts to include workspace search", async () => {
+    writeLegacyActionWorkspace();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Workspace search")).toBeInTheDocument());
   });
 
   it("supports switching an individual pane to icon view", async () => {
@@ -60,6 +119,26 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Folder sync"));
     expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
+  });
+
+  it("runs workspace search and adds results to the stash shelf", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Archive.tar")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Workspace search"));
+
+    const dialog = screen.getByRole("dialog", { name: "Workspace search" });
+    await user.type(within(dialog).getByLabelText("Query"), "Archive");
+    await user.click(within(dialog).getByRole("button", { name: "Search" }));
+
+    expect(await within(dialog).findByText("2 result(s)")).toBeInTheDocument();
+    expect(within(dialog).getByText("Archive.zip")).toBeInTheDocument();
+    expect(within(dialog).getByText("Archive.tar")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Shelf Archive.tar" }));
+    expect(await screen.findByText("Added 1 item(s) to shelf.")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Stash Shelf" })).getByText("Archive.tar")).toBeInTheDocument();
   });
 
   it("saves and loads batch rename presets", async () => {

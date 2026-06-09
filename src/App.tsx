@@ -119,6 +119,11 @@ interface ArchiveBrowserState {
   destinationPath: string;
 }
 
+interface WorkspaceSearchResult {
+  entry: FileEntry;
+  sourceLabels: string[];
+}
+
 const paneIds = [1, 2, 3, 4];
 const sortLabels: Record<SortKey, string> = {
   name: "Name",
@@ -161,6 +166,7 @@ const defaultBatchRenameRule: BatchRenameRule = {
 };
 
 const maxBatchRenameHistory = 50;
+const currentActionLayoutVersion = 2;
 
 const defaultToolbarActionIds = [
   "newFolder",
@@ -175,6 +181,7 @@ const defaultToolbarActionIds = [
   "addShelf",
   "colorRules",
   "quickLaunch",
+  "workspaceSearch",
   "refresh",
   "terminal",
   "bookmark"
@@ -204,6 +211,7 @@ const toolbarActionCatalog = [
   { id: "addShelf", label: "Add To Shelf" },
   { id: "colorRules", label: "Color Rules" },
   { id: "quickLaunch", label: "Quick Launch" },
+  { id: "workspaceSearch", label: "Workspace Search" },
   { id: "refresh", label: "Refresh" },
   { id: "terminal", label: "Open Terminal" },
   { id: "bookmark", label: "Add Bookmark" }
@@ -454,7 +462,12 @@ function normalizeFolderSyncPresets(input: FolderSyncPreset[] | undefined): Fold
     });
 }
 
-function normalizeActionIds(input: string[] | undefined, defaults: string[], catalog: ActionCatalogItem[]): string[] {
+function normalizeActionIds(
+  input: string[] | undefined,
+  defaults: string[],
+  catalog: ActionCatalogItem[],
+  migrateMissingDefaults = false
+): string[] {
   const validIds = new Set(catalog.map((item) => item.id));
   if (!input) return defaults;
   const seen = new Set<string>();
@@ -464,7 +477,16 @@ function normalizeActionIds(input: string[] | undefined, defaults: string[], cat
     return true;
   });
   if (input.length === 0) return [];
-  return normalized.length > 0 ? normalized : defaults;
+  if (normalized.length === 0) return defaults;
+  if (migrateMissingDefaults) {
+    for (const id of defaults) {
+      if (!seen.has(id) && validIds.has(id)) {
+        normalized.push(id);
+        seen.add(id);
+      }
+    }
+  }
+  return normalized;
 }
 
 function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapshot {
@@ -541,11 +563,13 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     folderSyncPresets: [],
     toolbarActionIds: defaultToolbarActionIds,
     contextMenuActionIds: defaultContextMenuActionIds,
+    actionLayoutVersion: currentActionLayoutVersion,
     savedAt: Date.now()
   };
 }
 
 function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapPayload): WorkspaceRecord {
+  const migrateActionLayout = (record.actionLayoutVersion ?? 1) < currentActionLayoutVersion;
   return {
     ...record,
     id: record.id || createWorkspaceId(),
@@ -561,8 +585,19 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     batchRenamePresets: normalizeBatchRenamePresets(record.batchRenamePresets),
     batchRenameHistory: normalizeBatchRenameHistory(record.batchRenameHistory),
     folderSyncPresets: normalizeFolderSyncPresets(record.folderSyncPresets),
-    toolbarActionIds: normalizeActionIds(record.toolbarActionIds, defaultToolbarActionIds, toolbarActionCatalog),
-    contextMenuActionIds: normalizeActionIds(record.contextMenuActionIds, defaultContextMenuActionIds, contextMenuActionCatalog),
+    toolbarActionIds: normalizeActionIds(
+      record.toolbarActionIds,
+      defaultToolbarActionIds,
+      toolbarActionCatalog,
+      migrateActionLayout
+    ),
+    contextMenuActionIds: normalizeActionIds(
+      record.contextMenuActionIds,
+      defaultContextMenuActionIds,
+      contextMenuActionCatalog,
+      migrateActionLayout
+    ),
+    actionLayoutVersion: currentActionLayoutVersion,
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -653,6 +688,7 @@ export default function App() {
   const [actionSettingsOpen, setActionSettingsOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
+  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
   const toastCounter = useRef(0);
 
@@ -745,6 +781,7 @@ export default function App() {
         folderSyncPresets,
         toolbarActionIds,
         contextMenuActionIds,
+        actionLayoutVersion: currentActionLayoutVersion,
         savedAt: Date.now()
       };
       const workspaceDocument = createWorkspaceDocument(snapshot);
@@ -791,6 +828,7 @@ export default function App() {
       folderSyncPresets,
       toolbarActionIds,
       contextMenuActionIds,
+      actionLayoutVersion: currentActionLayoutVersion,
       savedAt: Date.now()
     };
   }
@@ -1302,6 +1340,38 @@ export default function App() {
     );
   }
 
+  function addFileEntryToShelf(entry: FileEntry) {
+    const key = entry.path.toLowerCase();
+    if (stashItems.some((item) => item.path.toLowerCase() === key)) {
+      showToast("info", "Item is already on the shelf.");
+      return;
+    }
+    setStashItems((current) => [
+      ...current,
+      {
+        path: entry.path,
+        label: entry.name,
+        isDirectory: entry.isDirectory,
+        size: entry.size,
+        addedAt: Date.now()
+      }
+    ]);
+    showToast("success", "Added 1 item(s) to shelf.");
+  }
+
+  async function openWorkspaceSearchResult(entry: FileEntry) {
+    if (!activePane) return;
+    setWorkspaceSearchOpen(false);
+    setPreviewPath(entry.path);
+    setHashLine("");
+    if (entry.isDirectory) {
+      await loadPane(activePane.id, entry.path);
+      return;
+    }
+    await loadPane(activePane.id, entry.parentPath);
+    updatePane(activePane.id, (pane) => ({ ...pane, selectedPaths: [entry.path], anchorPath: entry.path }));
+  }
+
   async function transferShelf(mode: ClipboardMode) {
     if (!activePane || stashItems.length === 0) return;
     try {
@@ -1434,6 +1504,13 @@ export default function App() {
       onClick: () => setQuickLaunchMenuOpen((open) => !open),
       active: quickLaunchMenuOpen,
       disabled: !activePane
+    },
+    workspaceSearch: {
+      title: "Workspace search",
+      icon: Search,
+      onClick: () => setWorkspaceSearchOpen(true),
+      active: workspaceSearchOpen,
+      disabled: panes.length === 0
     },
     refresh: { title: "Refresh", icon: RefreshCcw, onClick: () => void refreshPane() },
     terminal: { title: "Open terminal", icon: Terminal, onClick: () => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), []) },
@@ -1693,6 +1770,18 @@ export default function App() {
           onSavePresets={saveFolderSyncPresets}
           onClose={() => setFolderSyncOpen(false)}
           onApply={(request) => void applyFolderSync(request)}
+        />
+      )}
+
+      {workspaceSearchOpen && (
+        <WorkspaceSearchModal
+          api={api}
+          panes={panes}
+          activePaneId={activePaneId}
+          onClose={() => setWorkspaceSearchOpen(false)}
+          onOpen={(entry) => void openWorkspaceSearchResult(entry)}
+          onReveal={(entry) => void perform("Reveal", () => api.revealPath(entry.path), [])}
+          onAddToShelf={addFileEntryToShelf}
         />
       )}
 
@@ -2778,6 +2867,163 @@ function NewFileModal({
             Create
           </button>
         </footer>
+      </section>
+    </div>
+  );
+}
+
+function WorkspaceSearchModal({
+  api,
+  panes,
+  activePaneId,
+  onClose,
+  onOpen,
+  onReveal,
+  onAddToShelf
+}: {
+  api: SpaceApi;
+  panes: PaneState[];
+  activePaneId: number;
+  onClose: () => void;
+  onOpen: (entry: FileEntry) => void;
+  onReveal: (entry: FileEntry) => void;
+  onAddToShelf: (entry: FileEntry) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [recursive, setRecursive] = useState(true);
+  const [results, setResults] = useState<WorkspaceSearchResult[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const roots = useMemo(() => {
+    const seen = new Set<string>();
+    return panes.filter((pane) => {
+      const key = pane.path.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [panes]);
+
+  async function runWorkspaceSearch() {
+    const searchQuery = query.trim();
+    if (!searchQuery) {
+      setError("Enter a search term.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setSearched(true);
+    try {
+      const perRootLimit = Math.max(50, Math.floor(500 / Math.max(roots.length, 1)));
+      const responses = await Promise.all(
+        roots.map(async (pane) => ({
+          pane,
+          entries: await api.searchFiles({
+            rootPath: pane.path,
+            query: searchQuery,
+            recursive,
+            limit: perRootLimit
+          })
+        }))
+      );
+      const resultMap = new Map<string, WorkspaceSearchResult>();
+      for (const response of responses) {
+        const sourceLabel = `P${response.pane.id} ${pathName(response.pane.path)}`;
+        for (const entry of response.entries) {
+          const key = entry.path.toLowerCase();
+          const existing = resultMap.get(key);
+          if (existing) {
+            if (!existing.sourceLabels.includes(sourceLabel)) existing.sourceLabels.push(sourceLabel);
+          } else {
+            resultMap.set(key, { entry, sourceLabels: [sourceLabel] });
+          }
+        }
+      }
+      setResults(
+        [...resultMap.values()]
+          .sort((a, b) => a.entry.name.localeCompare(b.entry.name, undefined, { sensitivity: "base", numeric: true }))
+          .slice(0, 500)
+      );
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal workspace-search-modal" role="dialog" aria-modal="true" aria-label="Workspace search">
+        <header className="modal-header">
+          <div>
+            <h2>Workspace Search</h2>
+            <span>{roots.length} pane root(s)</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <form
+          className="workspace-search-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runWorkspaceSearch();
+          }}
+        >
+          <label>
+            Query
+            <input value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} />
+            Subfolders
+          </label>
+          <button className="primary" type="submit" disabled={loading}>
+            Search
+          </button>
+        </form>
+
+        <div className="workspace-search-roots">
+          {roots.map((pane) => (
+            <span key={pane.id} className={pane.id === activePaneId ? "active" : ""} title={pane.path}>
+              P{pane.id}: {pathName(pane.path)}
+            </span>
+          ))}
+        </div>
+
+        {error && <p className="modal-error">{error}</p>}
+        <div className="workspace-search-summary">
+          {loading ? "Searching..." : searched ? `${results.length} result(s)` : "Ready"}
+        </div>
+
+        <div className="workspace-search-results">
+          <div className="workspace-search-header">
+            <span>Name</span>
+            <span>Size</span>
+            <span>Found In</span>
+            <span>Actions</span>
+          </div>
+          {results.map((result) => (
+            <div className="workspace-search-row" key={result.entry.path}>
+              <button className="workspace-search-file" onClick={() => onOpen(result.entry)}>
+                {result.entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
+                <span>
+                  <strong>{result.entry.name}</strong>
+                  <small title={result.entry.path}>{result.entry.parentPath}</small>
+                </span>
+              </button>
+              <span>{result.entry.isDirectory ? "" : formatBytes(result.entry.size)}</span>
+              <span title={result.sourceLabels.join(", ")}>{result.sourceLabels.join(", ")}</span>
+              <div className="workspace-search-actions">
+                <button onClick={() => onOpen(result.entry)}>Open {result.entry.name}</button>
+                <button onClick={() => onReveal(result.entry)}>Reveal {result.entry.name}</button>
+                <button onClick={() => onAddToShelf(result.entry)}>Shelf {result.entry.name}</button>
+              </div>
+            </div>
+          ))}
+          {!loading && searched && results.length === 0 && <div className="empty-folder">No matches found.</div>}
+        </div>
       </section>
     </div>
   );

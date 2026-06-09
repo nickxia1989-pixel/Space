@@ -141,6 +141,7 @@ export interface WorkspaceSnapshot {
   folderSyncPresets?: FolderSyncPreset[];
   toolbarActionIds?: string[];
   contextMenuActionIds?: string[];
+  actionLayoutVersion?: number;
   savedAt: number;
 }
 
