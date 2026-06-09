@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -113,6 +113,10 @@ function registerIpc(): void {
     return { ok: true, message: "Revealed.", affectedPaths: [targetPath] };
   });
   ipcMain.handle("space:open-terminal", (_event, directoryPath: string) => openTerminal(directoryPath));
+  ipcMain.handle("space:copy-text-to-clipboard", (_event, text: string) => {
+    clipboard.writeText(text);
+    return { ok: true, message: "Copied to clipboard." };
+  });
   ipcMain.handle("space:run-quick-launch", (_event, request: QuickLaunchRunRequest) => runQuickLaunch(request));
   ipcMain.handle("space:get-workspace", () => workspaceStore.read());
   ipcMain.handle("space:save-workspace", (_event, snapshot: WorkspaceDocument) => workspaceStore.write(snapshot));

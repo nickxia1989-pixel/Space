@@ -376,6 +376,7 @@ export interface SpaceApi {
   openPath(path: string): Promise<OperationResult>;
   revealPath(path: string): Promise<OperationResult>;
   openTerminal(path: string): Promise<OperationResult>;
+  copyTextToClipboard(text: string): Promise<OperationResult>;
   runQuickLaunch(request: QuickLaunchRunRequest): Promise<OperationResult>;
   getWorkspace(): Promise<WorkspaceDocument | null>;
   saveWorkspace(snapshot: WorkspaceDocument): Promise<OperationResult>;

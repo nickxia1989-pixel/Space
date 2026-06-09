@@ -343,6 +343,18 @@ function createBrowserMockApi(): SpaceApi {
     async openTerminal(path: string) {
       return mockResult(`Opened terminal in ${path}.`, [path]);
     },
+    async copyTextToClipboard(text: string) {
+      const storage = getMockStorage();
+      storage?.setItem("space.mock.clipboard", text);
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          // The browser fallback can still expose the copied text through localStorage for tests.
+        }
+      }
+      return mockResult("Copied to clipboard.");
+    },
     async runQuickLaunch(request) {
       return mockResult(`Launched ${request.item.label}.`, [request.currentPath, ...request.selectedPaths]);
     },

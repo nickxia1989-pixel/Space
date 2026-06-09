@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ArrowUp,
   Archive,
+  ClipboardCopy,
   Columns3,
   Copy,
   Download,
@@ -19,6 +20,7 @@ import {
   Image,
   LayoutGrid,
   List,
+  ListFilter,
   Monitor,
   MoreVertical,
   Music,
@@ -173,15 +175,17 @@ const defaultBatchRenameRule: BatchRenameRule = {
 };
 
 const maxBatchRenameHistory = 50;
-const currentActionLayoutVersion = 3;
+const currentActionLayoutVersion = 4;
 const hashAlgorithms: HashAlgorithm[] = ["sha256", "md5", "sha1", "sha512"];
 
 const defaultToolbarActionIds = [
   "newFolder",
   "newFile",
   "copy",
+  "copyPaths",
   "cut",
   "paste",
+  "selectSameType",
   "delete",
   "createZip",
   "batchRename",
@@ -197,6 +201,8 @@ const defaultToolbarActionIds = [
 ];
 const defaultContextMenuActionIds = [
   "copy",
+  "copyPaths",
+  "selectSameType",
   "cut",
   "paste",
   "rename",
@@ -211,8 +217,10 @@ const toolbarActionCatalog = [
   { id: "newFolder", label: "New Folder" },
   { id: "newFile", label: "New File" },
   { id: "copy", label: "Copy" },
+  { id: "copyPaths", label: "Copy Paths" },
   { id: "cut", label: "Cut" },
   { id: "paste", label: "Paste" },
+  { id: "selectSameType", label: "Select Same Type" },
   { id: "delete", label: "Delete" },
   { id: "createZip", label: "Create ZIP Archive" },
   { id: "batchRename", label: "Batch Rename" },
@@ -228,6 +236,8 @@ const toolbarActionCatalog = [
 ];
 const contextMenuActionCatalog = [
   { id: "copy", label: "Copy" },
+  { id: "copyPaths", label: "Copy Paths" },
+  { id: "selectSameType", label: "Select Same Type" },
   { id: "cut", label: "Cut" },
   { id: "paste", label: "Paste" },
   { id: "rename", label: "Rename" },
@@ -651,6 +661,11 @@ function visibleEntries(pane: PaneState): FileEntry[] {
       ? pane.entries.filter((entry) => entry.name.toLowerCase().includes(pane.filter.trim().toLowerCase()))
       : pane.entries;
   return sortEntries(filtered, pane.sortKey, pane.sortDirection);
+}
+
+function typeSelectionKey(entry: FileEntry): string {
+  if (entry.isDirectory) return "directory";
+  return `file:${entry.extension || entry.typeLabel || "file"}`.toLowerCase();
 }
 
 function isFormElement(target: EventTarget | null): boolean {
@@ -1153,6 +1168,30 @@ export default function App() {
     showToast("info", `${mode === "copy" ? "Copied" : "Cut"} ${activePane.selectedPaths.length} item(s).`);
   }
 
+  async function copySelectedPaths() {
+    if (!activePane?.selectedPaths.length) return;
+    const paths = [...activePane.selectedPaths];
+    try {
+      const result = await api.copyTextToClipboard(paths.join("\r\n"));
+      if (!result.ok) throw new Error(result.message);
+      showToast("success", `Copied ${paths.length} path(s).`);
+    } catch (error) {
+      showToast("error", `Copy paths failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  function selectSameType() {
+    if (!activePane || selectedEntries.length === 0) return;
+    const keys = new Set(selectedEntries.map(typeSelectionKey));
+    const matches = visibleEntries(activePane).filter((entry) => keys.has(typeSelectionKey(entry)));
+    updatePane(activePane.id, (pane) => ({
+      ...pane,
+      selectedPaths: matches.map((entry) => entry.path),
+      anchorPath: matches[0]?.path ?? pane.anchorPath
+    }));
+    showToast("info", `Selected ${matches.length} same type item(s).`);
+  }
+
   async function pasteInto(paneId = activePaneId) {
     const pane = panes.find((item) => item.id === paneId);
     if (!pane || !clipboard?.paths.length) return;
@@ -1470,6 +1509,9 @@ export default function App() {
     if (event.ctrlKey && event.key.toLowerCase() === "a") {
       event.preventDefault();
       selectAll();
+    } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      void copySelectedPaths();
     } else if (event.ctrlKey && event.key.toLowerCase() === "c") {
       event.preventDefault();
       copySelection("copy");
@@ -1501,8 +1543,10 @@ export default function App() {
     newFolder: { title: "New folder", icon: FolderPlus, onClick: () => void createItem("folder") },
     newFile: { title: "New file", icon: FilePlus2, onClick: () => setNewFileOpen(true) },
     copy: { title: "Copy", icon: Copy, onClick: () => copySelection("copy"), disabled: !activePane?.selectedPaths.length },
+    copyPaths: { title: "Copy paths", icon: ClipboardCopy, onClick: () => void copySelectedPaths(), disabled: !activePane?.selectedPaths.length },
     cut: { title: "Cut", icon: Scissors, onClick: () => copySelection("cut"), disabled: !activePane?.selectedPaths.length },
     paste: { title: "Paste", icon: FileText, onClick: () => void pasteInto(), disabled: !clipboard?.paths.length },
+    selectSameType: { title: "Select same type", icon: ListFilter, onClick: selectSameType, disabled: selectedEntries.length === 0 },
     delete: { title: "Delete", icon: Trash2, onClick: () => void deleteSelected(), disabled: !activePane?.selectedPaths.length },
     createZip: { title: "Create ZIP archive", icon: Archive, onClick: () => void createArchiveFromSelection(), disabled: !activePane?.selectedPaths.length },
     batchRename: { title: "Batch rename", icon: FileText, onClick: () => setBatchRenameOpen(true), disabled: !activePane?.selectedPaths.length },
@@ -1690,6 +1734,8 @@ export default function App() {
           state={contextMenu}
           actionIds={contextMenuActionIds}
           onCopy={() => copySelection("copy")}
+          onCopyPaths={() => void copySelectedPaths()}
+          onSelectSameType={selectSameType}
           onCut={() => copySelection("cut")}
           onPaste={() => void pasteInto(contextMenu.paneId)}
           onRename={() => void renameSelected()}
@@ -1708,6 +1754,7 @@ export default function App() {
           }}
           canPaste={!!clipboard?.paths.length}
           canAct={!!activePane?.selectedPaths.length}
+          canSelectSameType={selectedEntries.length > 0}
         />
       )}
 
@@ -4096,6 +4143,8 @@ function ContextMenu({
   state,
   actionIds,
   onCopy,
+  onCopyPaths,
+  onSelectSameType,
   onCut,
   onPaste,
   onRename,
@@ -4106,11 +4155,14 @@ function ContextMenu({
   onOpenTerminal,
   onQuickLaunch,
   canPaste,
-  canAct
+  canAct,
+  canSelectSameType
 }: {
   state: ContextMenuState;
   actionIds: string[];
   onCopy: () => void;
+  onCopyPaths: () => void;
+  onSelectSameType: () => void;
   onCut: () => void;
   onPaste: () => void;
   onRename: () => void;
@@ -4122,9 +4174,12 @@ function ContextMenu({
   onQuickLaunch: () => void;
   canPaste: boolean;
   canAct: boolean;
+  canSelectSameType: boolean;
 }) {
   const actions: Record<string, { label: string; disabled?: boolean; onClick: () => void }> = {
     copy: { label: "Copy", disabled: !canAct, onClick: onCopy },
+    copyPaths: { label: "Copy paths", disabled: !canAct, onClick: onCopyPaths },
+    selectSameType: { label: "Select same type", disabled: !canSelectSameType, onClick: onSelectSameType },
     cut: { label: "Cut", disabled: !canAct, onClick: onCut },
     paste: { label: `Paste into Pane ${state.paneId}`, disabled: !canPaste, onClick: onPaste },
     rename: { label: "Rename", disabled: !canAct, onClick: onRename },

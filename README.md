@@ -9,6 +9,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Per-pane details/icon views, sortable details columns, multi-select, status bar, and active-pane highlighting.
 - Quick Access sidebar for common Windows user folders, drive list, and user bookmarks.
 - File operations through Electron IPC: create folder, create templated file, rename, delete to trash, copy, move, open, reveal in Explorer, and open terminal.
+- Selection utilities: copy selected full paths to the system clipboard and expand the current selection to matching file types or folders.
 - Cross-pane workflows: copy/move selected files to any other pane, internal copy/cut/paste, and drag/drop copy or shift-drop move.
 - Search/filter: instant pane filtering and recursive search with bounded results.
 - Workspace Search: search across the current four-pane workspace, de-duplicate matches from overlapping pane roots, then open, reveal, or add results to Stash Shelf.
@@ -24,7 +25,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
 - Stash Shelf: collect files or folders from any pane, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
 - ZIP/TAR/TGZ archive tools: double-click supported archives to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
-- Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+R, Alt+Up, Delete, F2, and Enter.
+- Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+Shift+C for full paths, Ctrl+R, Alt+Up, Delete, F2, and Enter.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
 
 ## Commands

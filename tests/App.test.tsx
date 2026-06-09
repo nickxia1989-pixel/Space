@@ -73,12 +73,14 @@ describe("App", () => {
     expect(screen.getAllByPlaceholderText("Filter or search")).toHaveLength(4);
   });
 
-  it("migrates legacy action layouts to include workspace search", async () => {
+  it("migrates legacy action layouts to include current default actions", async () => {
     writeLegacyActionWorkspace();
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Workspace search")).toBeInTheDocument());
     expect(screen.getByLabelText("Hash compare")).toBeInTheDocument();
+    expect(screen.getByLabelText("Copy paths")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select same type")).toBeInTheDocument();
   });
 
   it("supports switching an individual pane to icon view", async () => {
@@ -157,6 +159,36 @@ describe("App", () => {
     expect(await within(dialog).findByText(/1 matching group/)).toBeInTheDocument();
     expect(within(dialog).getByText("2 matching files")).toBeInTheDocument();
     expect(within(dialog).getAllByText("mock-hash-value").length).toBeGreaterThan(0);
+  });
+
+  it("copies selected paths and selects matching item types", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Desktop")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Desktop"));
+    await user.click(screen.getByLabelText("Copy paths"));
+
+    expect(await screen.findByText("Copied 1 path(s).")).toBeInTheDocument();
+    expect(window.localStorage.getItem("space.mock.clipboard")).toBe("C:\\Users\\Traveler\\Desktop");
+
+    await user.click(screen.getByLabelText("Select same type"));
+    expect(await screen.findByText("Selected 4 same type item(s).")).toBeInTheDocument();
+    expect(screen.getByText("4 selected, 0 B")).toBeInTheDocument();
+
+    const shell = screen.getByText("Four-pane file manager").closest("main");
+    expect(shell).not.toBeNull();
+    fireEvent.keyDown(shell!, { key: "c", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByText("Copied 4 path(s).")).toBeInTheDocument();
+    expect(window.localStorage.getItem("space.mock.clipboard")).toBe(
+      [
+        "C:\\Users\\Traveler\\Desktop",
+        "C:\\Users\\Traveler\\Documents",
+        "C:\\Users\\Traveler\\Downloads",
+        "C:\\Users\\Traveler\\Pictures"
+      ].join("\r\n")
+    );
   });
 
   it("saves and loads batch rename presets", async () => {

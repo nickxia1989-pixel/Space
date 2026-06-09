@@ -40,6 +40,7 @@ const api: SpaceApi = {
   openPath: (path: string) => ipcRenderer.invoke("space:open-path", path),
   revealPath: (path: string) => ipcRenderer.invoke("space:reveal-path", path),
   openTerminal: (path: string) => ipcRenderer.invoke("space:open-terminal", path),
+  copyTextToClipboard: (text: string) => ipcRenderer.invoke("space:copy-text-to-clipboard", text),
   runQuickLaunch: (request: QuickLaunchRunRequest) => ipcRenderer.invoke("space:run-quick-launch", request),
   getWorkspace: () => ipcRenderer.invoke("space:get-workspace"),
   saveWorkspace: (snapshot: WorkspaceDocument) => ipcRenderer.invoke("space:save-workspace", snapshot)
