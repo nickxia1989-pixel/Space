@@ -123,6 +123,42 @@ describe("App", () => {
     expect(within(historyRegion).getByText("No batch rename operations recorded yet.")).toBeInTheDocument();
   });
 
+  it("saves and loads folder sync presets", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Folder sync"));
+
+    const dialog = screen.getByRole("dialog", { name: "Folder sync" });
+    fireEvent.change(within(dialog).getByLabelText("Direction"), { target: { value: "updateBoth" } });
+    fireEvent.change(within(dialog).getByLabelText("Filter"), { target: { value: "Mock" } });
+    fireEvent.change(within(dialog).getByLabelText("Preset name"), { target: { value: "Mirror Mock" } });
+    await user.click(within(dialog).getByRole("button", { name: "Save Preset" }));
+
+    await waitFor(() => {
+      const presets = readSavedWorkspace()?.workspaces[0]?.folderSyncPresets;
+      expect(presets).toHaveLength(1);
+      expect(presets?.[0].name).toBe("Mirror Mock");
+      expect(presets?.[0].direction).toBe("updateBoth");
+      expect(presets?.[0].filter).toBe("Mock");
+    });
+
+    const presetId = readSavedWorkspace()?.workspaces[0]?.folderSyncPresets?.[0].id;
+    expect(presetId).toBeDefined();
+    fireEvent.change(within(dialog).getByLabelText("Direction"), { target: { value: "updateLeft" } });
+    fireEvent.change(within(dialog).getByLabelText("Filter"), { target: { value: "Other" } });
+    fireEvent.change(within(dialog).getByLabelText("Left path"), { target: { value: "C:\\Changed" } });
+    fireEvent.change(within(dialog).getByLabelText("Preset"), { target: { value: presetId } });
+
+    expect(within(dialog).getByLabelText("Direction")).toHaveValue("updateBoth");
+    expect(within(dialog).getByLabelText("Filter")).toHaveValue("Mock");
+    expect(within(dialog).getByLabelText("Left path")).toHaveValue("C:\\Users\\Traveler");
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete Preset" }));
+    await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.folderSyncPresets).toHaveLength(0));
+  });
+
   it("collects selected files in the stash shelf and hashes them", async () => {
     const user = userEvent.setup();
     render(<App />);

@@ -70,6 +70,7 @@ import type {
   BatchRenameRule,
   FolderSyncDirection,
   FolderSyncPlan,
+  FolderSyncPreset,
   SortDirection,
   SortKey,
   SpaceApi,
@@ -392,6 +393,62 @@ function normalizeBatchRenameHistory(input: BatchRenameHistoryEntry[] | undefine
     .slice(0, maxBatchRenameHistory);
 }
 
+function createFolderSyncPreset(
+  name: string,
+  settings: {
+    leftPath: string;
+    rightPath: string;
+    direction: FolderSyncDirection;
+    includeHidden: boolean;
+    filter: string;
+  }
+): FolderSyncPreset {
+  const now = Date.now();
+  return {
+    id: `sync-preset-${now}-${Math.random().toString(16).slice(2, 8)}`,
+    name: name.trim() || "Folder Sync Preset",
+    leftPath: settings.leftPath,
+    rightPath: settings.rightPath,
+    direction: settings.direction,
+    includeHidden: settings.includeHidden,
+    filter: settings.filter,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function normalizeFolderSyncPresets(input: FolderSyncPreset[] | undefined): FolderSyncPreset[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  return input
+    .filter(
+      (preset) =>
+        preset &&
+        typeof preset.id === "string" &&
+        typeof preset.name === "string" &&
+        typeof preset.leftPath === "string" &&
+        typeof preset.rightPath === "string" &&
+        !seen.has(preset.id)
+    )
+    .map((preset) => {
+      seen.add(preset.id);
+      const direction: FolderSyncDirection =
+        preset.direction === "updateLeft" || preset.direction === "updateBoth" ? preset.direction : "updateRight";
+      const updatedAt = typeof preset.updatedAt === "number" ? preset.updatedAt : preset.createdAt || Date.now();
+      return {
+        id: preset.id,
+        name: preset.name.trim() || "Folder Sync Preset",
+        leftPath: preset.leftPath,
+        rightPath: preset.rightPath,
+        direction,
+        includeHidden: !!preset.includeHidden,
+        filter: typeof preset.filter === "string" ? preset.filter : "",
+        createdAt: typeof preset.createdAt === "number" ? preset.createdAt : updatedAt,
+        updatedAt
+      };
+    });
+}
+
 function normalizeActionIds(input: string[] | undefined, defaults: string[], catalog: ActionCatalogItem[]): string[] {
   const validIds = new Set(catalog.map((item) => item.id));
   if (!input) return defaults;
@@ -476,6 +533,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     quickLaunchItems: [createQuickLaunchItem()],
     batchRenamePresets: [],
     batchRenameHistory: [],
+    folderSyncPresets: [],
     toolbarActionIds: defaultToolbarActionIds,
     contextMenuActionIds: defaultContextMenuActionIds,
     savedAt: Date.now()
@@ -497,6 +555,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     quickLaunchItems: record.quickLaunchItems ?? [createQuickLaunchItem()],
     batchRenamePresets: normalizeBatchRenamePresets(record.batchRenamePresets),
     batchRenameHistory: normalizeBatchRenameHistory(record.batchRenameHistory),
+    folderSyncPresets: normalizeFolderSyncPresets(record.folderSyncPresets),
     toolbarActionIds: normalizeActionIds(record.toolbarActionIds, defaultToolbarActionIds, toolbarActionCatalog),
     contextMenuActionIds: normalizeActionIds(record.contextMenuActionIds, defaultContextMenuActionIds, contextMenuActionCatalog),
     savedAt: record.savedAt ?? Date.now()
@@ -571,6 +630,7 @@ export default function App() {
   const [quickLaunchItems, setQuickLaunchItems] = useState<QuickLaunchItem[]>([]);
   const [batchRenamePresets, setBatchRenamePresets] = useState<BatchRenamePreset[]>([]);
   const [batchRenameHistory, setBatchRenameHistory] = useState<BatchRenameHistoryEntry[]>([]);
+  const [folderSyncPresets, setFolderSyncPresets] = useState<FolderSyncPreset[]>([]);
   const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
   const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
@@ -620,6 +680,7 @@ export default function App() {
         setQuickLaunchItems(workspace.quickLaunchItems ?? []);
         setBatchRenamePresets(workspace.batchRenamePresets ?? []);
         setBatchRenameHistory(workspace.batchRenameHistory ?? []);
+        setFolderSyncPresets(workspace.folderSyncPresets ?? []);
         setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
         setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
         setPanes(hydrated);
@@ -676,6 +737,7 @@ export default function App() {
         quickLaunchItems,
         batchRenamePresets,
         batchRenameHistory,
+        folderSyncPresets,
         toolbarActionIds,
         contextMenuActionIds,
         savedAt: Date.now()
@@ -684,7 +746,7 @@ export default function App() {
       if (workspaceDocument) void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, batchRenameHistory, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, batchRenameHistory, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, folderSyncPresets, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -721,6 +783,7 @@ export default function App() {
       quickLaunchItems,
       batchRenamePresets,
       batchRenameHistory,
+      folderSyncPresets,
       toolbarActionIds,
       contextMenuActionIds,
       savedAt: Date.now()
@@ -766,6 +829,16 @@ export default function App() {
     });
   }
 
+  function saveFolderSyncPresets(nextPresets: FolderSyncPreset[]): void {
+    const normalizedPresets = normalizeFolderSyncPresets(nextPresets);
+    setFolderSyncPresets(normalizedPresets);
+    persistCurrentWorkspaceSnapshot({
+      ...getCurrentWorkspaceSnapshot(),
+      folderSyncPresets: normalizedPresets,
+      savedAt: Date.now()
+    });
+  }
+
   function saveCurrentWorkspaceToList(records = workspaces): WorkspaceRecord[] {
     if (!activeWorkspaceId || panes.length !== 4) return records;
     const snapshot = getCurrentWorkspaceSnapshot();
@@ -783,6 +856,7 @@ export default function App() {
     setQuickLaunchItems(workspace.quickLaunchItems ?? []);
     setBatchRenamePresets(workspace.batchRenamePresets ?? []);
     setBatchRenameHistory(workspace.batchRenameHistory ?? []);
+    setFolderSyncPresets(workspace.folderSyncPresets ?? []);
     setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
     setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
     setPreviewPath(null);
@@ -1135,26 +1209,25 @@ export default function App() {
   }
 
   async function applyFolderSync(request: {
-    leftPaneId: number;
-    rightPaneId: number;
+    leftPath: string;
+    rightPath: string;
+    refreshPaneIds: number[];
     direction: FolderSyncDirection;
     includeHidden: boolean;
     filter: string;
   }) {
-    const leftPane = panes.find((pane) => pane.id === request.leftPaneId);
-    const rightPane = panes.find((pane) => pane.id === request.rightPaneId);
-    if (!leftPane || !rightPane || leftPane.id === rightPane.id) return;
+    if (!request.leftPath || !request.rightPath || request.leftPath.toLowerCase() === request.rightPath.toLowerCase()) return;
     await perform(
       "Folder sync",
       () =>
         api.applyFolderSync({
-          leftPath: leftPane.path,
-          rightPath: rightPane.path,
+          leftPath: request.leftPath,
+          rightPath: request.rightPath,
           direction: request.direction,
           includeHidden: request.includeHidden,
           filter: request.filter
         }),
-      [leftPane.id, rightPane.id]
+      request.refreshPaneIds.length > 0 ? request.refreshPaneIds : [activePaneId]
     );
     setFolderSyncOpen(false);
   }
@@ -1611,6 +1684,8 @@ export default function App() {
           api={api}
           panes={panes}
           activePaneId={activePane.id}
+          presets={folderSyncPresets}
+          onSavePresets={saveFolderSyncPresets}
           onClose={() => setFolderSyncOpen(false)}
           onApply={(request) => void applyFolderSync(request)}
         />
@@ -3326,16 +3401,21 @@ function FolderSyncModal({
   api,
   panes,
   activePaneId,
+  presets,
+  onSavePresets,
   onClose,
   onApply
 }: {
   api: SpaceApi;
   panes: PaneState[];
   activePaneId: number;
+  presets: FolderSyncPreset[];
+  onSavePresets: (presets: FolderSyncPreset[]) => void;
   onClose: () => void;
   onApply: (request: {
-    leftPaneId: number;
-    rightPaneId: number;
+    leftPath: string;
+    rightPath: string;
+    refreshPaneIds: number[];
     direction: FolderSyncDirection;
     includeHidden: boolean;
     filter: string;
@@ -3344,27 +3424,31 @@ function FolderSyncModal({
   const defaultRightPaneId = panes.find((pane) => pane.id !== activePaneId)?.id ?? activePaneId;
   const [leftPaneId, setLeftPaneId] = useState(activePaneId);
   const [rightPaneId, setRightPaneId] = useState(defaultRightPaneId);
+  const [leftPath, setLeftPath] = useState(panes.find((pane) => pane.id === activePaneId)?.path ?? "");
+  const [rightPath, setRightPath] = useState(panes.find((pane) => pane.id === defaultRightPaneId)?.path ?? "");
   const [direction, setDirection] = useState<FolderSyncDirection>("updateRight");
   const [includeHidden, setIncludeHidden] = useState(false);
   const [filter, setFilter] = useState("");
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
   const [plan, setPlan] = useState<FolderSyncPlan | null>(null);
   const [error, setError] = useState("");
 
   const leftPane = panes.find((pane) => pane.id === leftPaneId);
   const rightPane = panes.find((pane) => pane.id === rightPaneId);
-  const sameFolder = !!leftPane && !!rightPane && leftPane.path.toLowerCase() === rightPane.path.toLowerCase();
+  const sameFolder = !!leftPath && !!rightPath && leftPath.toLowerCase() === rightPath.toLowerCase();
 
   useEffect(() => {
     let cancelled = false;
     setError("");
-    if (!leftPane || !rightPane || sameFolder) {
+    if (!leftPath || !rightPath || sameFolder) {
       setPlan(null);
       return;
     }
     api
       .previewFolderSync({
-        leftPath: leftPane.path,
-        rightPath: rightPane.path,
+        leftPath,
+        rightPath,
         direction,
         includeHidden,
         filter
@@ -3378,7 +3462,78 @@ function FolderSyncModal({
     return () => {
       cancelled = true;
     };
-  }, [api, direction, filter, includeHidden, leftPane, rightPane, sameFolder]);
+  }, [api, direction, filter, includeHidden, leftPath, rightPath, sameFolder]);
+
+  function selectPane(side: "left" | "right", paneId: number) {
+    const pane = panes.find((item) => item.id === paneId);
+    if (side === "left") {
+      setLeftPaneId(paneId);
+      if (pane) setLeftPath(pane.path);
+    } else {
+      setRightPaneId(paneId);
+      if (pane) setRightPath(pane.path);
+    }
+  }
+
+  function matchPaneId(targetPath: string, fallbackPaneId: number) {
+    return panes.find((pane) => pane.path.toLowerCase() === targetPath.toLowerCase())?.id ?? fallbackPaneId;
+  }
+
+  function loadPreset(presetId: string) {
+    setSelectedPresetId(presetId);
+    const preset = presets.find((item) => item.id === presetId);
+    if (!preset) {
+      setPresetName("");
+      return;
+    }
+    setPresetName(preset.name);
+    setLeftPath(preset.leftPath);
+    setRightPath(preset.rightPath);
+    setLeftPaneId(matchPaneId(preset.leftPath, leftPaneId));
+    setRightPaneId(matchPaneId(preset.rightPath, rightPaneId));
+    setDirection(preset.direction);
+    setIncludeHidden(preset.includeHidden);
+    setFilter(preset.filter);
+  }
+
+  function currentSettings() {
+    return { leftPath, rightPath, direction, includeHidden, filter };
+  }
+
+  function savePreset() {
+    const name = presetName.trim() || `Sync Preset ${presets.length + 1}`;
+    if (selectedPresetId) {
+      const now = Date.now();
+      const nextPresets = presets.map((preset) =>
+        preset.id === selectedPresetId ? { ...preset, ...currentSettings(), name, updatedAt: now } : preset
+      );
+      onSavePresets(nextPresets);
+      setPresetName(name);
+      return;
+    }
+    const preset = createFolderSyncPreset(name, currentSettings());
+    onSavePresets([...presets, preset]);
+    setSelectedPresetId(preset.id);
+    setPresetName(preset.name);
+  }
+
+  function deletePreset() {
+    if (!selectedPresetId) return;
+    onSavePresets(presets.filter((preset) => preset.id !== selectedPresetId));
+    setSelectedPresetId("");
+    setPresetName("");
+  }
+
+  function refreshPaneIds() {
+    const ids = new Set<number>();
+    const matchedLeft = panes.find((pane) => pane.path.toLowerCase() === leftPath.toLowerCase());
+    const matchedRight = panes.find((pane) => pane.path.toLowerCase() === rightPath.toLowerCase());
+    if (matchedLeft) ids.add(matchedLeft.id);
+    if (matchedRight) ids.add(matchedRight.id);
+    if (leftPane) ids.add(leftPane.id);
+    if (rightPane) ids.add(rightPane.id);
+    return [...ids];
+  }
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3391,10 +3546,36 @@ function FolderSyncModal({
           <button onClick={onClose}>Close</button>
         </header>
 
+        <div className="sync-preset-bar">
+          <label>
+            Preset
+            <select value={selectedPresetId} onChange={(event) => loadPreset(event.target.value)}>
+              <option value="">Custom sync</option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Preset name
+            <input
+              value={presetName}
+              placeholder="Reusable sync name"
+              onChange={(event) => setPresetName(event.target.value)}
+            />
+          </label>
+          <button onClick={savePreset}>Save Preset</button>
+          <button disabled={!selectedPresetId} onClick={deletePreset}>
+            Delete Preset
+          </button>
+        </div>
+
         <div className="sync-form">
           <label>
             Left
-            <select value={leftPaneId} onChange={(event) => setLeftPaneId(Number(event.target.value))}>
+            <select value={leftPaneId} onChange={(event) => selectPane("left", Number(event.target.value))}>
               {panes.map((pane) => (
                 <option key={pane.id} value={pane.id}>
                   P{pane.id} {pathName(pane.path)}
@@ -3404,13 +3585,21 @@ function FolderSyncModal({
           </label>
           <label>
             Right
-            <select value={rightPaneId} onChange={(event) => setRightPaneId(Number(event.target.value))}>
+            <select value={rightPaneId} onChange={(event) => selectPane("right", Number(event.target.value))}>
               {panes.map((pane) => (
                 <option key={pane.id} value={pane.id}>
                   P{pane.id} {pathName(pane.path)}
                 </option>
               ))}
             </select>
+          </label>
+          <label>
+            Left path
+            <input value={leftPath} onChange={(event) => setLeftPath(event.target.value)} />
+          </label>
+          <label>
+            Right path
+            <input value={rightPath} onChange={(event) => setRightPath(event.target.value)} />
           </label>
           <label>
             Direction
@@ -3459,7 +3648,7 @@ function FolderSyncModal({
           <button
             className="primary"
             disabled={!plan || plan.actions.length === 0 || sameFolder}
-            onClick={() => onApply({ leftPaneId, rightPaneId, direction, includeHidden, filter })}
+            onClick={() => onApply({ ...currentSettings(), refreshPaneIds: refreshPaneIds() })}
           >
             Sync
           </button>

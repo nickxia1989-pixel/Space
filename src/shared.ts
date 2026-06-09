@@ -138,6 +138,7 @@ export interface WorkspaceSnapshot {
   quickLaunchItems?: QuickLaunchItem[];
   batchRenamePresets?: BatchRenamePreset[];
   batchRenameHistory?: BatchRenameHistoryEntry[];
+  folderSyncPresets?: FolderSyncPreset[];
   toolbarActionIds?: string[];
   contextMenuActionIds?: string[];
   savedAt: number;
@@ -264,6 +265,13 @@ export interface FolderSyncRequest {
   direction: FolderSyncDirection;
   includeHidden: boolean;
   filter: string;
+}
+
+export interface FolderSyncPreset extends FolderSyncRequest {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface FolderSyncAction {

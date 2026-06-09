@@ -1044,7 +1044,8 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.rename-preset-bar {
+.rename-preset-bar,
+.sync-preset-bar {
   display: grid;
   grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) auto auto;
   align-items: end;
@@ -1220,6 +1221,7 @@ button:disabled {
 }
 
 .rename-preset-bar label,
+.sync-preset-bar label,
 .rename-form label,
 .sync-form label,
 .template-editor label,
@@ -1234,6 +1236,8 @@ button:disabled {
 
 .rename-preset-bar input,
 .rename-preset-bar select,
+.sync-preset-bar input,
+.sync-preset-bar select,
 .rename-form input,
 .rename-form select,
 .sync-form input,
@@ -1251,6 +1255,8 @@ button:disabled {
 
 .rename-preset-bar input:focus,
 .rename-preset-bar select:focus,
+.sync-preset-bar input:focus,
+.sync-preset-bar select:focus,
 .rename-form input:focus,
 .rename-form select:focus,
 .sync-form input:focus,
@@ -1282,7 +1288,8 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
-.rename-preset-bar button {
+.rename-preset-bar button,
+.sync-preset-bar button {
   height: 34px;
   white-space: nowrap;
 }
@@ -1660,12 +1667,14 @@ button:disabled {
 
 @media (max-width: 900px) {
   .rename-preset-bar,
+  .sync-preset-bar,
   .rename-form,
   .sync-form {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .rename-preset-bar button {
+  .rename-preset-bar button,
+  .sync-preset-bar button {
     width: 100%;
   }
 
