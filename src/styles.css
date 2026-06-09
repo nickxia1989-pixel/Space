@@ -1044,6 +1044,14 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.rename-preset-bar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px 16px 0;
+}
+
 .sync-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1211,6 +1219,7 @@ button:disabled {
   color: #aeb9cb;
 }
 
+.rename-preset-bar label,
 .rename-form label,
 .sync-form label,
 .template-editor label,
@@ -1223,6 +1232,8 @@ button:disabled {
   font-size: 12px;
 }
 
+.rename-preset-bar input,
+.rename-preset-bar select,
 .rename-form input,
 .rename-form select,
 .sync-form input,
@@ -1238,6 +1249,8 @@ button:disabled {
   outline: none;
 }
 
+.rename-preset-bar input:focus,
+.rename-preset-bar select:focus,
 .rename-form input:focus,
 .rename-form select:focus,
 .sync-form input:focus,
@@ -1267,6 +1280,11 @@ button:disabled {
 .color-rule-editor .rule-enabled,
 .quick-launch-editor .launch-enabled {
   grid-column: 1 / -1;
+}
+
+.rename-preset-bar button {
+  height: 34px;
+  white-space: nowrap;
 }
 
 .color-rule-editor input[type="color"] {
@@ -1570,5 +1588,17 @@ button:disabled {
   .details-header button:nth-child(4),
   .details-row > span:nth-child(4) {
     display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .rename-preset-bar,
+  .rename-form,
+  .sync-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rename-preset-bar button {
+    width: 100%;
   }
 }

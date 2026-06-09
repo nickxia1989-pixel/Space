@@ -64,6 +64,7 @@ import type {
   OperationResult,
   QuickLaunchItem,
   QuickLaunchType,
+  BatchRenamePreset,
   BatchRenamePreview,
   BatchRenameRule,
   FolderSyncDirection,
@@ -141,6 +142,22 @@ const quickLaunchVariableTokens = [
   "{firstName}",
   "{selectedNames}"
 ];
+
+const defaultBatchRenameRule: BatchRenameRule = {
+  pattern: "{name}-{n}",
+  startNumber: 1,
+  step: 1,
+  padLength: 2,
+  prefix: "",
+  suffix: "",
+  find: "",
+  replace: "",
+  useRegex: false,
+  caseSensitive: false,
+  caseMode: "none",
+  includeExtension: false
+};
+
 const defaultToolbarActionIds = [
   "newFolder",
   "newFile",
@@ -277,6 +294,39 @@ function createQuickLaunchItem(label = "PowerShell Here"): QuickLaunchItem {
   };
 }
 
+function cloneBatchRenameRule(rule: BatchRenameRule): BatchRenameRule {
+  return { ...defaultBatchRenameRule, ...rule };
+}
+
+function createBatchRenamePreset(name: string, rule: BatchRenameRule): BatchRenamePreset {
+  const now = Date.now();
+  return {
+    id: `rename-preset-${now}-${Math.random().toString(16).slice(2, 8)}`,
+    name: name.trim() || "Rename Preset",
+    rule: cloneBatchRenameRule(rule),
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function normalizeBatchRenamePresets(input: BatchRenamePreset[] | undefined): BatchRenamePreset[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  return input
+    .filter((preset) => preset && typeof preset.id === "string" && typeof preset.name === "string" && !seen.has(preset.id))
+    .map((preset) => {
+      seen.add(preset.id);
+      const updatedAt = typeof preset.updatedAt === "number" ? preset.updatedAt : preset.createdAt || Date.now();
+      return {
+        id: preset.id,
+        name: preset.name.trim() || "Rename Preset",
+        rule: cloneBatchRenameRule(preset.rule),
+        createdAt: typeof preset.createdAt === "number" ? preset.createdAt : updatedAt,
+        updatedAt
+      };
+    });
+}
+
 function normalizeActionIds(input: string[] | undefined, defaults: string[], catalog: ActionCatalogItem[]): string[] {
   const validIds = new Set(catalog.map((item) => item.id));
   if (!input) return defaults;
@@ -359,6 +409,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     fileTemplates: [],
     colorRules: [],
     quickLaunchItems: [createQuickLaunchItem()],
+    batchRenamePresets: [],
     toolbarActionIds: defaultToolbarActionIds,
     contextMenuActionIds: defaultContextMenuActionIds,
     savedAt: Date.now()
@@ -378,6 +429,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     fileTemplates: record.fileTemplates ?? [],
     colorRules: record.colorRules ?? [],
     quickLaunchItems: record.quickLaunchItems ?? [createQuickLaunchItem()],
+    batchRenamePresets: normalizeBatchRenamePresets(record.batchRenamePresets),
     toolbarActionIds: normalizeActionIds(record.toolbarActionIds, defaultToolbarActionIds, toolbarActionCatalog),
     contextMenuActionIds: normalizeActionIds(record.contextMenuActionIds, defaultContextMenuActionIds, contextMenuActionCatalog),
     savedAt: record.savedAt ?? Date.now()
@@ -450,6 +502,7 @@ export default function App() {
   const [fileTemplates, setFileTemplates] = useState<NewFileTemplate[]>([]);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [quickLaunchItems, setQuickLaunchItems] = useState<QuickLaunchItem[]>([]);
+  const [batchRenamePresets, setBatchRenamePresets] = useState<BatchRenamePreset[]>([]);
   const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
   const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
@@ -497,6 +550,7 @@ export default function App() {
         setFileTemplates(workspace.fileTemplates ?? []);
         setColorRules(workspace.colorRules ?? []);
         setQuickLaunchItems(workspace.quickLaunchItems ?? []);
+        setBatchRenamePresets(workspace.batchRenamePresets ?? []);
         setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
         setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
         setPanes(hydrated);
@@ -551,6 +605,7 @@ export default function App() {
         fileTemplates,
         colorRules,
         quickLaunchItems,
+        batchRenamePresets,
         toolbarActionIds,
         contextMenuActionIds,
         savedAt: Date.now()
@@ -559,7 +614,7 @@ export default function App() {
       if (workspaceDocument) void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -594,6 +649,7 @@ export default function App() {
       fileTemplates,
       colorRules,
       quickLaunchItems,
+      batchRenamePresets,
       toolbarActionIds,
       contextMenuActionIds,
       savedAt: Date.now()
@@ -620,6 +676,15 @@ export default function App() {
     void api.saveWorkspace(workspaceDocument);
   }
 
+  function saveBatchRenamePresets(nextPresets: BatchRenamePreset[]): void {
+    setBatchRenamePresets(nextPresets);
+    persistCurrentWorkspaceSnapshot({
+      ...getCurrentWorkspaceSnapshot(),
+      batchRenamePresets: nextPresets,
+      savedAt: Date.now()
+    });
+  }
+
   function saveCurrentWorkspaceToList(records = workspaces): WorkspaceRecord[] {
     if (!activeWorkspaceId || panes.length !== 4) return records;
     const snapshot = getCurrentWorkspaceSnapshot();
@@ -635,6 +700,7 @@ export default function App() {
     setFileTemplates(workspace.fileTemplates ?? []);
     setColorRules(workspace.colorRules ?? []);
     setQuickLaunchItems(workspace.quickLaunchItems ?? []);
+    setBatchRenamePresets(workspace.batchRenamePresets ?? []);
     setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
     setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
     setPreviewPath(null);
@@ -1442,6 +1508,8 @@ export default function App() {
         <BatchRenameModal
           api={api}
           paths={activePane.selectedPaths}
+          presets={batchRenamePresets}
+          onSavePresets={saveBatchRenamePresets}
           onClose={() => setBatchRenameOpen(false)}
           onApply={(rule) => void applyBatchRename(rule)}
         />
@@ -2902,33 +2970,24 @@ function formatDatePreview(format: string, date: Date): string {
   return format.replace(/yyyy|yy|MM|M|dd|d|HH|H|mm|m|ss|s/g, (token) => replacements[token]);
 }
 
-const defaultBatchRenameRule: BatchRenameRule = {
-  pattern: "{name}-{n}",
-  startNumber: 1,
-  step: 1,
-  padLength: 2,
-  prefix: "",
-  suffix: "",
-  find: "",
-  replace: "",
-  useRegex: false,
-  caseSensitive: false,
-  caseMode: "none",
-  includeExtension: false
-};
-
 function BatchRenameModal({
   api,
   paths,
+  presets,
+  onSavePresets,
   onClose,
   onApply
 }: {
   api: SpaceApi;
   paths: string[];
+  presets: BatchRenamePreset[];
+  onSavePresets: (presets: BatchRenamePreset[]) => void;
   onClose: () => void;
   onApply: (rule: BatchRenameRule) => void;
 }) {
   const [rule, setRule] = useState<BatchRenameRule>(defaultBatchRenameRule);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
   const [preview, setPreview] = useState<BatchRenamePreview | null>(null);
   const [error, setError] = useState<string>("");
 
@@ -2956,6 +3015,43 @@ function BatchRenameModal({
     setRule((current) => ({ ...current, [key]: value }));
   }
 
+  function loadPreset(presetId: string) {
+    setSelectedPresetId(presetId);
+    const preset = presets.find((item) => item.id === presetId);
+    if (!preset) {
+      setPresetName("");
+      return;
+    }
+    setPresetName(preset.name);
+    setRule(cloneBatchRenameRule(preset.rule));
+  }
+
+  function savePreset() {
+    const name = presetName.trim() || `Preset ${presets.length + 1}`;
+    if (selectedPresetId) {
+      const now = Date.now();
+      const nextPresets = presets.map((preset) =>
+        preset.id === selectedPresetId
+          ? { ...preset, name, rule: cloneBatchRenameRule(rule), updatedAt: now }
+          : preset
+      );
+      onSavePresets(nextPresets);
+      setPresetName(name);
+      return;
+    }
+    const preset = createBatchRenamePreset(name, rule);
+    onSavePresets([...presets, preset]);
+    setSelectedPresetId(preset.id);
+    setPresetName(preset.name);
+  }
+
+  function deletePreset() {
+    if (!selectedPresetId) return;
+    onSavePresets(presets.filter((preset) => preset.id !== selectedPresetId));
+    setSelectedPresetId("");
+    setPresetName("");
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="modal rename-modal" role="dialog" aria-modal="true" aria-label="Batch rename">
@@ -2966,6 +3062,37 @@ function BatchRenameModal({
           </div>
           <button onClick={onClose}>Close</button>
         </header>
+
+        <div className="rename-preset-bar">
+          <label>
+            Preset
+            <select value={selectedPresetId} onChange={(event) => loadPreset(event.target.value)}>
+              <option value="">Custom rule</option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Preset name
+            <input
+              value={presetName}
+              placeholder="Reusable rule name"
+              onChange={(event) => {
+                setPresetName(event.target.value);
+                if (selectedPresetId && presets.every((preset) => preset.id !== selectedPresetId)) {
+                  setSelectedPresetId("");
+                }
+              }}
+            />
+          </label>
+          <button onClick={savePreset}>Save Preset</button>
+          <button disabled={!selectedPresetId} onClick={deletePreset}>
+            Delete Preset
+          </button>
+        </div>
 
         <div className="rename-form">
           <label>

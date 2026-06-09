@@ -62,6 +62,37 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
   });
 
+  it("saves and loads batch rename presets", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Batch rename"));
+
+    const dialog = screen.getByRole("dialog", { name: "Batch rename" });
+    const formatInput = within(dialog).getByLabelText("Format");
+    fireEvent.change(formatInput, { target: { value: "note-{n}" } });
+    await user.type(within(dialog).getByLabelText("Preset name"), "Numbered Notes");
+    await user.click(within(dialog).getByRole("button", { name: "Save Preset" }));
+
+    await waitFor(() => {
+      const presets = readSavedWorkspace()?.workspaces[0]?.batchRenamePresets;
+      expect(presets).toHaveLength(1);
+      expect(presets?.[0].name).toBe("Numbered Notes");
+      expect(presets?.[0].rule.pattern).toBe("note-{n}");
+    });
+
+    const presetId = readSavedWorkspace()?.workspaces[0]?.batchRenamePresets?.[0].id;
+    expect(presetId).toBeDefined();
+    fireEvent.change(formatInput, { target: { value: "changed-{n}" } });
+    fireEvent.change(within(dialog).getByLabelText("Preset"), { target: { value: presetId } });
+    expect(formatInput).toHaveValue("note-{n}");
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete Preset" }));
+    await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.batchRenamePresets).toHaveLength(0));
+  });
+
   it("collects selected files in the stash shelf and hashes them", async () => {
     const user = userEvent.setup();
     render(<App />);

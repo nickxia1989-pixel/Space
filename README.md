@@ -17,7 +17,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Quick Launch: per-workspace launch items run apps, command lines, or shortcuts from the active pane with variables for current path and selected files.
 - Custom Actions: per-workspace toolbar and context menu actions can be shown, hidden, reordered, and restored to defaults.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
-- Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, and apply.
+- Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, reusable workspace presets, and apply.
 - Folder sync: compare two panes, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, and execute the sync.
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
 - Stash Shelf: collect files or folders from any pane, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
@@ -59,4 +59,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, saved batch rename presets, scheduled/automatic folder sync presets, media-dimension color rules, global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync presets, media-dimension color rules, global hotkeys, custom per-action icons, arbitrary third-party context menu providers, and rename operation history are not implemented yet.

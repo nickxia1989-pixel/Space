@@ -15,7 +15,7 @@
 | Custom toolbar/context menu | `tests/App.test.tsx` action visibility and context menu customization coverage |
 | Cross-pane transfer commands | Renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
-| Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage |
+| Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage; `tests/App.test.tsx` preset save/load/delete coverage |
 | Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage |
 | Workspace tabs and persistence | `tests/App.test.tsx`; `tests/workspaceStore.test.ts`; smoke launch loads app with store available |
 | Stash Shelf | `tests/App.test.tsx` shelf add/hash/clear coverage; manual copy/move shelf checks |
@@ -51,7 +51,7 @@ Expected result: all commands exit with code `0`.
 8. Toggle details/icon view in a single pane and verify the other panes retain their own view state.
 9. Filter a pane by keyword and run recursive search with `Subfolders` checked.
 10. Select a text or image file and verify the inspector preview, metadata, reveal action, and SHA-256 action.
-11. Select multiple files, open Batch Rename, confirm preview status, apply, and verify renamed files appear in the pane.
+11. Select multiple files, open Batch Rename, save a reusable preset, load it again, delete it, confirm preview status, apply, and verify renamed files appear in the pane.
 12. Open two folders in separate panes, use Folder Sync, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
 13. Create a new workspace tab, clone it, rename it, switch back and forth, and confirm each workspace keeps its own four-pane paths and view state.
 14. Select files in multiple panes, add them to Stash Shelf, preview a shelf item, copy the shelf to the active pane, move another shelf batch to the active pane, remove one shelf item, clear the shelf, and calculate SHA-256 for staged files.
@@ -59,7 +59,7 @@ Expected result: all commands exit with code `0`.
 16. Open Color Rules, add a rule for `.zip` files, save it, and confirm matching entries are highlighted in details view and icon view without changing selection behavior.
 17. Open Quick Launch, run the default PowerShell item from a pane, add a custom command/app/shortcut item, use `{currentPath}` and `{selectedPaths}`, save, and confirm it appears in the Quick Launch panel.
 18. Open Customize Actions, hide and reorder toolbar actions, save, and verify the toolbar updates; customize the Context Menu and verify right-click actions follow the saved layout.
-19. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, and action layout are restored.
+19. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, batch rename presets, and action layout are restored.
 20. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
 21. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
@@ -79,6 +79,7 @@ Open `http://127.0.0.1:5188/` and verify:
 - The New File panel can create a Markdown note from the built-in date template.
 - The Color Rules panel can add a `.zip` rule and immediately highlight `Archive.zip`.
 - The Quick Launch panel runs the default item through the browser mock and opens the settings panel.
+- The Batch Rename panel can save a preset, load it back from the preset selector, and delete it.
 - The Customize Actions panel can hide a toolbar action and remove a context-menu action.
 - Filtering `Space` in pane 1 reduces the mock result set.
 - Adding `Space Notes.md` to Stash Shelf shows it in the left sidebar and Hash reports a shelf SHA-256 line.

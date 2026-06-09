@@ -136,6 +136,7 @@ export interface WorkspaceSnapshot {
   fileTemplates?: NewFileTemplate[];
   colorRules?: ColorRule[];
   quickLaunchItems?: QuickLaunchItem[];
+  batchRenamePresets?: BatchRenamePreset[];
   toolbarActionIds?: string[];
   contextMenuActionIds?: string[];
   savedAt: number;
@@ -210,6 +211,14 @@ export interface BatchRenameRule {
   caseSensitive: boolean;
   caseMode: RenameCaseMode;
   includeExtension: boolean;
+}
+
+export interface BatchRenamePreset {
+  id: string;
+  name: string;
+  rule: BatchRenameRule;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface BatchRenameRequest {
