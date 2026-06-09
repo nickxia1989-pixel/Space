@@ -854,6 +854,15 @@ export default function App() {
     return pane ? pane.entries.filter((entry) => containsPath(pane.selectedPaths, entry.path)) : [];
   }
 
+  function paneIdsForPaths(paths: string[]): number[] {
+    const pathKeys = new Set(paths.map((item) => item.trim().toLowerCase()).filter(Boolean));
+    return panes.filter((pane) => pathKeys.has(pane.path.toLowerCase())).map((pane) => pane.id);
+  }
+
+  function operationRefreshIds(baseIds: number[], paths: string[]): number[] {
+    return [...new Set([...baseIds, ...paneIdsForPaths(paths)])];
+  }
+
   function nextPaneLoadRequest(paneId: number): number {
     const requestId = (paneLoadCounters.current[paneId] ?? 0) + 1;
     paneLoadCounters.current[paneId] = requestId;
@@ -1414,6 +1423,8 @@ export default function App() {
 
   async function createItem(kind: "file" | "folder") {
     if (!activePane) return;
+    const parentPath = activePane.path;
+    const refreshIds = operationRefreshIds([activePane.id], [parentPath]);
     const fallback = kind === "folder" ? "New Folder" : "New File.txt";
     const name = window.prompt(kind === "folder" ? "Folder name" : "File name", fallback);
     if (!name) return;
@@ -1421,17 +1432,20 @@ export default function App() {
       kind === "folder" ? "Create folder" : "Create file",
       () =>
         kind === "folder"
-          ? api.createFolder({ parentPath: activePane.path, name })
-          : api.createFile({ parentPath: activePane.path, name })
+          ? api.createFolder({ parentPath, name })
+          : api.createFile({ parentPath, name }),
+      refreshIds
     );
   }
 
   async function createTemplatedFile(request: { name: string; content: string; saveTemplateName?: string }) {
     if (!activePane) return;
+    const parentPath = activePane.path;
+    const refreshIds = operationRefreshIds([activePane.id], [parentPath]);
     try {
-      const result = await api.createFile({ parentPath: activePane.path, name: request.name, content: request.content });
+      const result = await api.createFile({ parentPath, name: request.name, content: request.content });
       showToast("success", `Created ${result.name}.`);
-      await refreshPane(activePane.id);
+      await Promise.all(refreshIds.map((id) => refreshPane(id)));
       const savedTemplateName = request.saveTemplateName?.trim();
       if (savedTemplateName) {
         setFileTemplates((current) => [
@@ -1456,9 +1470,10 @@ export default function App() {
     const pane = paneById(paneId);
     if (!pane || pane.selectedPaths.length !== 1) return;
     const sourcePath = pane.selectedPaths[0];
+    const refreshIds = operationRefreshIds([pane.id], [parentPath(sourcePath)]);
     const name = window.prompt("Rename", pathName(sourcePath));
     if (!name) return;
-    await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), [pane.id]);
+    await perform("Rename", () => api.renameItem({ path: sourcePath, newName: name }), refreshIds);
   }
 
   async function deleteSelected(paneId = activePaneId) {
@@ -1467,7 +1482,7 @@ export default function App() {
     const selectedPaths = [...pane.selectedPaths];
     const ok = window.confirm(`Delete ${selectedPaths.length} selected item(s)?`);
     if (!ok) return;
-    await perform("Delete", () => api.deleteItems({ paths: selectedPaths }), [pane.id]);
+    await perform("Delete", () => api.deleteItems({ paths: selectedPaths }), operationRefreshIds([pane.id], selectedPaths.map(parentPath)));
   }
 
   async function calculateSelectedHash(algorithm: HashAlgorithm = "sha256", paneId = activePaneId) {
@@ -1486,13 +1501,14 @@ export default function App() {
     if (!activePane?.selectedPaths.length) return;
     const paneId = activePane.id;
     const paths = [...activePane.selectedPaths];
+    const refreshIds = operationRefreshIds([paneId], paths.map(parentPath));
     try {
       const preview = await api.previewBatchRename({ paths, rule });
       const result = await api.applyBatchRename({ paths, rule });
       const message = result.message ?? "Batch rename complete.";
       saveBatchRenameHistory([createBatchRenameHistoryEntry(rule, preview, message), ...batchRenameHistory]);
       showToast("success", message);
-      await refreshPane(paneId);
+      await Promise.all(refreshIds.map((id) => refreshPane(id)));
       setBatchRenameOpen(false);
     } catch (error) {
       showToast("error", `Batch rename failed: ${getErrorMessage(error)}`);

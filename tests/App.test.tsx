@@ -41,6 +41,33 @@ function testDirectory(path: string, entries: FileEntry[]): DirectoryPayload {
   return { path, entries, scannedAt: 1 };
 }
 
+function writeWorkspaceWithPanePaths(panePaths: string[]): void {
+  const document: WorkspaceDocument = {
+    activeWorkspaceId: "default",
+    workspaces: [
+      {
+        id: "default",
+        name: "Default",
+        layout: "grid",
+        activePaneId: 1,
+        panes: panePaths.map((panePath, index) => ({
+          id: index + 1,
+          path: panePath,
+          history: [panePath],
+          historyIndex: 0,
+          sortKey: "name",
+          sortDirection: "asc",
+          viewMode: "details"
+        })),
+        bookmarks: [],
+        savedAt: 1
+      }
+    ],
+    savedAt: 1
+  };
+  window.localStorage.setItem("space.mock.workspace", JSON.stringify(document));
+}
+
 function writeLegacyActionWorkspace(): void {
   const homePath = "C:\\Users\\Traveler";
   const panePaths = [
@@ -258,6 +285,25 @@ describe("App", () => {
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(screen.getByText(`Note-${today}.md`)).toBeInTheDocument());
+  });
+
+  it("refreshes every pane showing the same folder after creating a folder", async () => {
+    const user = userEvent.setup();
+    const homePath = "C:\\Users\\Traveler";
+    writeWorkspaceWithPanePaths([homePath, homePath, `${homePath}\\Downloads`, `${homePath}\\Documents`]);
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Shared Folder");
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Space Notes.md")).toBeInTheDocument());
+
+    await user.click(screen.getByLabelText("New folder"));
+
+    expect(await within(pane1).findByText("Shared Folder")).toBeInTheDocument();
+    expect(await within(pane2).findByText("Shared Folder")).toBeInTheDocument();
+    promptSpy.mockRestore();
   });
 
   it("opens advanced batch rename and folder sync panels", async () => {
