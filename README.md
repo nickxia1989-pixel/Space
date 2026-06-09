@@ -16,6 +16,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, and apply.
 - Folder sync: compare two panes, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, and execute the sync.
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
+- ZIP archive tools: double-click ZIP files to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
 - Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+R, Alt+Up, Delete, F2, and Enter.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
 
@@ -44,4 +45,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. QSpace advanced extension areas such as FTP/SFTP/cloud drives, archive browsing, saved batch rename presets, scheduled/automatic folder sync presets, file color rules, and fully customizable toolbars/context menus are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, saved batch rename presets, scheduled/automatic folder sync presets, file color rules, and fully customizable toolbars/context menus are not implemented yet.

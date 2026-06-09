@@ -1,5 +1,11 @@
 import type {
   BootstrapPayload,
+  ArchiveCreateRequest,
+  ArchiveDirectoryPayload,
+  ArchiveExtractRequest,
+  ArchiveListRequest,
+  ArchivePreviewPayload,
+  ArchivePreviewRequest,
   BatchRenamePreview,
   BatchRenameRequest,
   CreateItemRequest,
@@ -204,6 +210,68 @@ function createBrowserMockApi(): SpaceApi {
     },
     async applyFolderSync(request: FolderSyncRequest) {
       return mockResult(`Synchronized ${request.leftPath} with ${request.rightPath}.`, [request.leftPath, request.rightPath]);
+    },
+    async listArchive(request: ArchiveListRequest): Promise<ArchiveDirectoryPayload> {
+      const rootEntries = [
+        {
+          name: "docs",
+          archivePath: request.archivePath,
+          internalPath: "docs/",
+          parentInternalPath: "",
+          isDirectory: true,
+          size: 0,
+          modifiedAt: Date.now(),
+          extension: "",
+          typeLabel: "Folder"
+        },
+        {
+          name: "readme.txt",
+          archivePath: request.archivePath,
+          internalPath: "readme.txt",
+          parentInternalPath: "",
+          isDirectory: false,
+          size: 150,
+          modifiedAt: Date.now(),
+          extension: ".txt",
+          typeLabel: "TXT File"
+        }
+      ];
+      const docsEntries = [
+        {
+          name: "guide.md",
+          archivePath: request.archivePath,
+          internalPath: "docs/guide.md",
+          parentInternalPath: "docs/",
+          isDirectory: false,
+          size: 300,
+          modifiedAt: Date.now(),
+          extension: ".md",
+          typeLabel: "MD File"
+        }
+      ];
+      return {
+        archivePath: request.archivePath,
+        internalPath: request.internalPath,
+        entries: request.internalPath === "docs/" ? docsEntries : rootEntries,
+        scannedAt: Date.now()
+      };
+    },
+    async previewArchiveEntry(request: ArchivePreviewRequest): Promise<ArchivePreviewPayload> {
+      return {
+        archivePath: request.archivePath,
+        internalPath: request.internalPath,
+        name: pathName(request.internalPath),
+        kind: "text",
+        size: 150,
+        modifiedAt: Date.now(),
+        text: `Preview for ${request.internalPath}`
+      };
+    },
+    async extractArchive(request: ArchiveExtractRequest) {
+      return mockResult(`Extracted ${request.internalPaths.length || 1} item(s).`, [request.destinationPath]);
+    },
+    async createArchive(request: ArchiveCreateRequest) {
+      return mockResult(`Created ${pathName(request.destinationZipPath)}.`, [request.destinationZipPath]);
     },
     async openPath(path: string) {
       return mockResult(`Opened ${path}.`, [path]);

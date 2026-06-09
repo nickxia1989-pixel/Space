@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Archive,
   Columns3,
   Copy,
   Download,
@@ -60,6 +61,8 @@ import type {
   SpaceApi,
   ViewMode,
   WorkspaceDocument,
+  ArchiveEntry,
+  ArchivePreviewPayload,
   WorkspacePaneSnapshot,
   WorkspaceRecord,
   WorkspaceSnapshot
@@ -93,6 +96,11 @@ interface ContextMenuState {
   y: number;
   paneId: number;
   path?: string;
+}
+
+interface ArchiveBrowserState {
+  archivePath: string;
+  destinationPath: string;
 }
 
 const paneIds = [1, 2, 3, 4];
@@ -244,6 +252,11 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function joinDisplayPath(parent: string, child: string): string {
+  const separator = parent.includes("\\") ? "\\" : "/";
+  return `${parent.replace(/[\\/]+$/, "")}${separator}${child}`;
+}
+
 export default function App() {
   const api = useMemo<SpaceApi>(() => getSpaceApi(), []);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
@@ -261,6 +274,7 @@ export default function App() {
   const [hashLine, setHashLine] = useState<string>("");
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
+  const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
   const toastCounter = useRef(0);
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
@@ -615,6 +629,9 @@ export default function App() {
     setPreviewPath(entry.path);
     if (entry.isDirectory) {
       void loadPane(paneId, entry.path);
+    } else if (entry.extension.toLowerCase() === ".zip") {
+      const pane = panes.find((item) => item.id === paneId);
+      setArchiveBrowser({ archivePath: entry.path, destinationPath: pane?.path ?? entry.parentPath });
     } else {
       void perform("Open", () => api.openPath(entry.path), []);
     }
@@ -727,6 +744,23 @@ export default function App() {
     setFolderSyncOpen(false);
   }
 
+  async function createArchiveFromSelection() {
+    if (!activePane?.selectedPaths.length) return;
+    const defaultPath = joinDisplayPath(activePane.path, "Archive.zip");
+    const destinationZipPath = window.prompt("Archive path", defaultPath);
+    if (!destinationZipPath) return;
+    await perform(
+      "Create archive",
+      () =>
+        api.createArchive({
+          sources: activePane.selectedPaths,
+          destinationZipPath,
+          includeRootFolder: true
+        }),
+      [activePane.id]
+    );
+  }
+
   function addBookmark() {
     if (!activePane) return;
     const exists = bookmarks.some((bookmark) => bookmark.path.toLowerCase() === activePane.path.toLowerCase());
@@ -837,6 +871,7 @@ export default function App() {
           <IconButton title="Paste" onClick={() => void pasteInto()} icon={FileText} disabled={!clipboard?.paths.length} />
           <IconButton title="Delete" onClick={() => void deleteSelected()} icon={Trash2} disabled={!activePane?.selectedPaths.length} />
           <span className="toolbar-divider" />
+          <IconButton title="Create ZIP archive" onClick={() => void createArchiveFromSelection()} icon={Archive} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Batch rename" onClick={() => setBatchRenameOpen(true)} icon={FileText} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
           <span className="toolbar-divider" />
@@ -958,6 +993,16 @@ export default function App() {
           activePaneId={activePane.id}
           onClose={() => setFolderSyncOpen(false)}
           onApply={(request) => void applyFolderSync(request)}
+        />
+      )}
+
+      {archiveBrowser && (
+        <ArchiveBrowserModal
+          api={api}
+          archivePath={archiveBrowser.archivePath}
+          destinationPath={archiveBrowser.destinationPath}
+          onClose={() => setArchiveBrowser(null)}
+          onExtracted={() => void refreshPane(activePaneId)}
         />
       )}
 
@@ -1403,6 +1448,173 @@ function Inspector({
         </>
       )}
     </aside>
+  );
+}
+
+function ArchiveBrowserModal({
+  api,
+  archivePath,
+  destinationPath,
+  onClose,
+  onExtracted
+}: {
+  api: SpaceApi;
+  archivePath: string;
+  destinationPath: string;
+  onClose: () => void;
+  onExtracted: () => void;
+}) {
+  const [internalPath, setInternalPath] = useState("");
+  const [entries, setEntries] = useState<ArchiveEntry[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [preview, setPreview] = useState<ArchivePreviewPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    setMessage("");
+    api
+      .listArchive({ archivePath, internalPath })
+      .then((payload) => {
+        if (cancelled) return;
+        setEntries(payload.entries);
+        setSelectedPaths([]);
+        setPreview(null);
+        setLoading(false);
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(getErrorMessage(caught));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, archivePath, internalPath]);
+
+  async function selectEntry(entry: ArchiveEntry, event: React.MouseEvent) {
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedPaths((current) =>
+        current.includes(entry.internalPath)
+          ? current.filter((item) => item !== entry.internalPath)
+          : [...current, entry.internalPath]
+      );
+    } else {
+      setSelectedPaths([entry.internalPath]);
+    }
+    if (entry.isDirectory) {
+      setPreview({
+        archivePath,
+        internalPath: entry.internalPath,
+        name: entry.name,
+        kind: "directory",
+        size: 0,
+        modifiedAt: entry.modifiedAt
+      });
+      return;
+    }
+    try {
+      setPreview(await api.previewArchiveEntry({ archivePath, internalPath: entry.internalPath }));
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    }
+  }
+
+  function openEntry(entry: ArchiveEntry) {
+    if (entry.isDirectory) {
+      setInternalPath(entry.internalPath);
+    }
+  }
+
+  function goUp() {
+    if (!internalPath) return;
+    const trimmed = internalPath.replace(/\/$/, "");
+    const parent = trimmed.includes("/") ? `${trimmed.slice(0, trimmed.lastIndexOf("/") + 1)}` : "";
+    setInternalPath(parent);
+  }
+
+  async function extractSelected(all: boolean) {
+    try {
+      const result = await api.extractArchive({
+        archivePath,
+        destinationPath,
+        internalPaths: all ? [] : selectedPaths
+      });
+      setMessage(result.message);
+      onExtracted();
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal archive-modal" role="dialog" aria-modal="true" aria-label="Archive browser">
+        <header className="modal-header">
+          <div>
+            <h2>{pathName(archivePath)}</h2>
+            <span>{internalPath || "Archive root"}</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="archive-toolbar">
+          <button onClick={goUp} disabled={!internalPath}>
+            Up
+          </button>
+          <button onClick={() => void extractSelected(false)} disabled={!selectedPaths.length}>
+            Extract Selected
+          </button>
+          <button onClick={() => void extractSelected(true)}>Extract All</button>
+          <span title={destinationPath}>Destination: {destinationPath}</span>
+        </div>
+
+        {error && <p className="modal-error">{error}</p>}
+        {message && <p className="modal-help">{message}</p>}
+        <div className="archive-body">
+          <div className="archive-list">
+            <div className="preview-header archive-header">
+              <span>Name</span>
+              <span>Size</span>
+              <span>Modified</span>
+            </div>
+            {entries.map((entry) => (
+              <button
+                key={entry.internalPath}
+                className={`archive-row ${selectedPaths.includes(entry.internalPath) ? "selected" : ""}`}
+                onClick={(event) => void selectEntry(entry, event)}
+                onDoubleClick={() => openEntry(entry)}
+              >
+                <span className="file-name-cell">
+                  {entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
+                  <span>{entry.name}</span>
+                </span>
+                <span>{entry.isDirectory ? "" : formatBytes(entry.size)}</span>
+                <span>{formatDate(entry.modifiedAt)}</span>
+              </button>
+            ))}
+            {loading && <div className="empty-folder">Loading archive...</div>}
+            {!loading && entries.length === 0 && <div className="empty-folder">Archive folder is empty.</div>}
+          </div>
+
+          <div className="archive-preview">
+            {!preview && <p className="empty-note">Select an archive entry to preview it.</p>}
+            {preview?.kind === "image" && preview.dataUrl && <img src={preview.dataUrl} alt={preview.name} />}
+            {preview?.kind === "text" && <pre>{preview.text}</pre>}
+            {preview && preview.kind !== "image" && preview.kind !== "text" && (
+              <div className="preview-fallback">
+                {preview.kind === "directory" ? <Folder size={42} /> : <File size={42} />}
+                <span>{preview.kind}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

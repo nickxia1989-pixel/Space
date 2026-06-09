@@ -9,11 +9,15 @@ import {
   deleteItems,
   applyBatchRename,
   applyFolderSync,
+  createArchive,
+  extractArchive,
   getBootstrap,
+  listArchive,
   listDirectory,
   moveItems,
   openTerminal,
   previewBatchRename,
+  previewArchiveEntry,
   previewFolderSync,
   previewPath,
   renameItem,
@@ -22,6 +26,10 @@ import {
 import { WorkspaceStore } from "./workspaceStore.js";
 import type {
   CreateItemRequest,
+  ArchiveCreateRequest,
+  ArchiveExtractRequest,
+  ArchiveListRequest,
+  ArchivePreviewRequest,
   BatchRenameRequest,
   DeleteRequest,
   FileOperationRequest,
@@ -89,6 +97,10 @@ function registerIpc(): void {
   ipcMain.handle("space:apply-batch-rename", (_event, request: BatchRenameRequest) => applyBatchRename(request));
   ipcMain.handle("space:preview-folder-sync", (_event, request: FolderSyncRequest) => previewFolderSync(request));
   ipcMain.handle("space:apply-folder-sync", (_event, request: FolderSyncRequest) => applyFolderSync(request));
+  ipcMain.handle("space:list-archive", (_event, request: ArchiveListRequest) => listArchive(request));
+  ipcMain.handle("space:preview-archive-entry", (_event, request: ArchivePreviewRequest) => previewArchiveEntry(request));
+  ipcMain.handle("space:extract-archive", (_event, request: ArchiveExtractRequest) => extractArchive(request));
+  ipcMain.handle("space:create-archive", (_event, request: ArchiveCreateRequest) => createArchive(request));
   ipcMain.handle("space:open-path", async (_event, targetPath: string) => {
     const error = await shell.openPath(targetPath);
     return error ? { ok: false, message: error } : { ok: true, message: "Opened.", affectedPaths: [targetPath] };

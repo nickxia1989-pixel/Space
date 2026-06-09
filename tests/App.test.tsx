@@ -38,6 +38,16 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
   });
 
+  it("opens zip archives in the archive browser", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
+    await user.dblClick(screen.getByText("Archive.zip"));
+    expect(screen.getByRole("dialog", { name: "Archive browser" })).toBeInTheDocument();
+    expect(screen.getByText("readme.txt")).toBeInTheDocument();
+  });
+
   it("creates, renames, and clones workspace tabs", async () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Design");

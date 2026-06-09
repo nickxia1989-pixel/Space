@@ -11,9 +11,13 @@ import {
   deleteItems,
   applyBatchRename,
   applyFolderSync,
+  createArchive,
+  extractArchive,
   listDirectory,
+  listArchive,
   moveItems,
   previewBatchRename,
+  previewArchiveEntry,
   previewFolderSync,
   previewPath,
   renameItem,
@@ -214,6 +218,45 @@ describe("fileService", () => {
         filter: ""
       })
     ).rejects.toThrow("Choose two different folders");
+  });
+
+  it("creates, lists, previews, and extracts zip archives", async () => {
+    const sourceFolder = await createFolder({ parentPath: tempRoot, name: "ArchiveSource" });
+    const nestedFolder = await createFolder({ parentPath: sourceFolder.path, name: "docs" });
+    await fs.writeFile(path.join(sourceFolder.path, "readme.txt"), "zip preview text", "utf8");
+    await fs.writeFile(path.join(nestedFolder.path, "guide.md"), "# Guide", "utf8");
+    const destinationZipPath = path.join(tempRoot, "bundle.zip");
+
+    const created = await createArchive({
+      sources: [sourceFolder.path],
+      destinationZipPath,
+      includeRootFolder: true
+    });
+    expect(created.affectedPaths).toEqual([destinationZipPath]);
+
+    const root = await listArchive({ archivePath: destinationZipPath, internalPath: "" });
+    expect(root.entries.map((entry) => entry.name)).toEqual(["ArchiveSource"]);
+
+    const source = await listArchive({ archivePath: destinationZipPath, internalPath: "ArchiveSource/" });
+    expect(source.entries.map((entry) => entry.name).sort()).toEqual(["docs", "readme.txt"]);
+
+    const preview = await previewArchiveEntry({
+      archivePath: destinationZipPath,
+      internalPath: "ArchiveSource/readme.txt"
+    });
+    expect(preview.kind).toBe("text");
+    expect(preview.text).toContain("zip preview text");
+
+    const extractTarget = await createFolder({ parentPath: tempRoot, name: "Extracted" });
+    const extracted = await extractArchive({
+      archivePath: destinationZipPath,
+      destinationPath: extractTarget.path,
+      internalPaths: ["ArchiveSource/docs/"]
+    });
+    expect(extracted.affectedPaths?.map((targetPath) => path.relative(extractTarget.path, targetPath))).toEqual([
+      path.join("ArchiveSource", "docs", "guide.md")
+    ]);
+    await expect(fs.readFile(path.join(extractTarget.path, "ArchiveSource", "docs", "guide.md"), "utf8")).resolves.toBe("# Guide");
   });
 });
 

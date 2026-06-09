@@ -7,6 +7,7 @@ export type HashAlgorithm = "md5" | "sha1" | "sha256" | "sha512";
 export type RenameCaseMode = "none" | "lower" | "upper" | "title";
 export type FolderSyncDirection = "updateRight" | "updateLeft" | "updateBoth";
 export type FolderSyncActionType = "copyLeftToRight" | "copyRightToLeft";
+export type ArchivePreviewKind = "image" | "text" | "directory" | "binary" | "missing";
 
 export interface FileEntry {
   name: string;
@@ -194,6 +195,59 @@ export interface FolderSyncPlan {
   skipped: number;
 }
 
+export interface ArchiveEntry {
+  name: string;
+  archivePath: string;
+  internalPath: string;
+  parentInternalPath: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: number;
+  extension: string;
+  typeLabel: string;
+}
+
+export interface ArchiveDirectoryPayload {
+  archivePath: string;
+  internalPath: string;
+  entries: ArchiveEntry[];
+  scannedAt: number;
+}
+
+export interface ArchiveListRequest {
+  archivePath: string;
+  internalPath: string;
+}
+
+export interface ArchivePreviewRequest {
+  archivePath: string;
+  internalPath: string;
+}
+
+export interface ArchivePreviewPayload {
+  archivePath: string;
+  internalPath: string;
+  name: string;
+  kind: ArchivePreviewKind;
+  size: number;
+  modifiedAt: number;
+  dataUrl?: string;
+  text?: string;
+  truncated?: boolean;
+}
+
+export interface ArchiveExtractRequest {
+  archivePath: string;
+  destinationPath: string;
+  internalPaths: string[];
+}
+
+export interface ArchiveCreateRequest {
+  sources: string[];
+  destinationZipPath: string;
+  includeRootFolder: boolean;
+}
+
 export interface SpaceApi {
   bootstrap(): Promise<BootstrapPayload>;
   listDirectory(path: string): Promise<DirectoryPayload>;
@@ -210,6 +264,10 @@ export interface SpaceApi {
   applyBatchRename(request: BatchRenameRequest): Promise<OperationResult>;
   previewFolderSync(request: FolderSyncRequest): Promise<FolderSyncPlan>;
   applyFolderSync(request: FolderSyncRequest): Promise<OperationResult>;
+  listArchive(request: ArchiveListRequest): Promise<ArchiveDirectoryPayload>;
+  previewArchiveEntry(request: ArchivePreviewRequest): Promise<ArchivePreviewPayload>;
+  extractArchive(request: ArchiveExtractRequest): Promise<OperationResult>;
+  createArchive(request: ArchiveCreateRequest): Promise<OperationResult>;
   openPath(path: string): Promise<OperationResult>;
   revealPath(path: string): Promise<OperationResult>;
   openTerminal(path: string): Promise<OperationResult>;

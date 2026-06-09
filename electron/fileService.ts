@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import JSZip from "jszip";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
+  ArchiveCreateRequest,
+  ArchiveDirectoryPayload,
+  ArchiveEntry,
+  ArchiveExtractRequest,
+  ArchiveListRequest,
+  ArchivePreviewPayload,
+  ArchivePreviewRequest,
   BootstrapPayload,
   BatchRenamePreview,
   BatchRenamePreviewItem,
@@ -612,6 +620,214 @@ async function collectSyncFiles(rootPath: string, request: FolderSyncRequest): P
 
   await scan(rootPath);
   return { files, skipped };
+}
+
+export async function listArchive(request: ArchiveListRequest): Promise<ArchiveDirectoryPayload> {
+  const archivePath = normalizeInputPath(request.archivePath);
+  const zip = await loadZip(archivePath);
+  const internalPath = normalizeArchiveDirectory(request.internalPath);
+  const entryMap = new Map<string, ArchiveEntry>();
+
+  for (const [rawPath, zipEntry] of Object.entries(zip.files)) {
+    const normalizedPath = normalizeArchivePath(rawPath);
+    if (!normalizedPath.startsWith(internalPath)) continue;
+    const rest = normalizedPath.slice(internalPath.length);
+    if (!rest) continue;
+    const segment = rest.split("/")[0];
+    if (!segment) continue;
+    const childInternalPath = `${internalPath}${segment}${rest.includes("/") || zipEntry.dir ? "/" : ""}`;
+    const existing = entryMap.get(childInternalPath);
+    if (existing) {
+      if (!existing.modifiedAt && zipEntry.date) existing.modifiedAt = zipEntry.date.getTime();
+      continue;
+    }
+    const isDirectory = childInternalPath.endsWith("/");
+    const extension = isDirectory ? "" : path.posix.extname(segment).toLowerCase();
+    entryMap.set(childInternalPath, {
+      name: segment,
+      archivePath,
+      internalPath: childInternalPath,
+      parentInternalPath: internalPath,
+      isDirectory,
+      size: isDirectory ? 0 : getZipEntrySize(zipEntry),
+      modifiedAt: zipEntry.date?.getTime() ?? 0,
+      extension,
+      typeLabel: isDirectory ? "Folder" : extension ? `${extension.slice(1).toUpperCase()} File` : "File"
+    });
+  }
+
+  return {
+    archivePath,
+    internalPath,
+    entries: [...entryMap.values()].sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+    }),
+    scannedAt: Date.now()
+  };
+}
+
+export async function previewArchiveEntry(request: ArchivePreviewRequest): Promise<ArchivePreviewPayload> {
+  const archivePath = normalizeInputPath(request.archivePath);
+  const internalPath = normalizeArchivePath(request.internalPath);
+  const name = path.posix.basename(internalPath.replace(/\/$/, ""));
+  const zip = await loadZip(archivePath);
+  const zipEntry = zip.file(internalPath);
+  if (!zipEntry) {
+    const directoryExists = Object.keys(zip.files).some((entryPath) => normalizeArchivePath(entryPath).startsWith(normalizeArchiveDirectory(internalPath)));
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: directoryExists ? "directory" : "missing",
+      size: 0,
+      modifiedAt: 0
+    };
+  }
+
+  const extension = path.posix.extname(name).toLowerCase();
+  const size = getZipEntrySize(zipEntry);
+  const modifiedAt = zipEntry.date?.getTime() ?? 0;
+  const imageMime = IMAGE_MIME_BY_EXTENSION[extension];
+  if (imageMime && size <= 8 * 1024 * 1024) {
+    const data = await zipEntry.async("nodebuffer");
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: "image",
+      size,
+      modifiedAt,
+      dataUrl: `data:${imageMime};base64,${data.toString("base64")}`
+    };
+  }
+
+  if (TEXT_EXTENSIONS.has(extension) && size <= 1024 * 1024) {
+    const text = await zipEntry.async("string");
+    const truncated = text.length > 12000;
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: "text",
+      size,
+      modifiedAt,
+      text: truncated ? text.slice(0, 12000) : text,
+      truncated
+    };
+  }
+
+  return { archivePath, internalPath, name, kind: "binary", size, modifiedAt };
+}
+
+export async function extractArchive(request: ArchiveExtractRequest): Promise<OperationResult> {
+  const archivePath = normalizeInputPath(request.archivePath);
+  const destinationPath = normalizeInputPath(request.destinationPath);
+  const zip = await loadZip(archivePath);
+  const requestedPaths = request.internalPaths.map(normalizeArchivePath).filter(Boolean);
+  const selected = requestedPaths.length ? requestedPaths : [""];
+  const affectedPaths: string[] = [];
+
+  for (const [rawPath, zipEntry] of Object.entries(zip.files)) {
+    if (zipEntry.dir) continue;
+    const internalPath = normalizeArchivePath(rawPath);
+    const shouldExtract = selected.some((selectedPath) => {
+      const selectedDirectory = normalizeArchiveDirectory(selectedPath);
+      return !selectedPath || internalPath === selectedPath || internalPath.startsWith(selectedDirectory);
+    });
+    if (!shouldExtract) continue;
+    const targetPath = safeDestinationPath(destinationPath, internalPath);
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+    const data = await zipEntry.async("nodebuffer");
+    await fsp.writeFile(targetPath, data);
+    if (zipEntry.date) await fsp.utimes(targetPath, new Date(), zipEntry.date);
+    affectedPaths.push(targetPath);
+  }
+
+  return {
+    ok: true,
+    message: affectedPaths.length ? `Extracted ${affectedPaths.length} item(s).` : "No archive entries extracted.",
+    affectedPaths
+  };
+}
+
+export async function createArchive(request: ArchiveCreateRequest): Promise<OperationResult> {
+  if (!request.sources.length) throw new Error("Select files or folders to archive.");
+  const zip = new JSZip();
+  for (const source of request.sources) {
+    const sourcePath = normalizeInputPath(source);
+    const stats = await fsp.lstat(sourcePath);
+    if (stats.isDirectory()) {
+      const baseName = path.basename(sourcePath);
+      const rootInArchive = request.includeRootFolder ? baseName : "";
+      await addDirectoryToZip(zip, sourcePath, rootInArchive);
+    } else {
+      const data = await fsp.readFile(sourcePath);
+      zip.file(path.basename(sourcePath), data, { date: stats.mtime });
+    }
+  }
+
+  const destinationZipPath = await uniqueTargetPath(ensureZipExtension(normalizeInputPath(request.destinationZipPath)));
+  await fsp.mkdir(path.dirname(destinationZipPath), { recursive: true });
+  const content = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  await fsp.writeFile(destinationZipPath, content);
+  return { ok: true, message: `Created ${path.basename(destinationZipPath)}.`, affectedPaths: [destinationZipPath] };
+}
+
+async function addDirectoryToZip(zip: JSZip, directoryPath: string, archiveRoot: string): Promise<void> {
+  const names = await fsp.readdir(directoryPath);
+  if (archiveRoot) zip.folder(toArchivePath(archiveRoot));
+  for (const name of names) {
+    const childPath = path.join(directoryPath, name);
+    const stats = await fsp.lstat(childPath);
+    const archivePath = archiveRoot ? `${toArchivePath(archiveRoot)}/${name}` : name;
+    if (stats.isDirectory()) {
+      await addDirectoryToZip(zip, childPath, archivePath);
+    } else {
+      const data = await fsp.readFile(childPath);
+      zip.file(toArchivePath(archivePath), data, { date: stats.mtime });
+    }
+  }
+}
+
+async function loadZip(archivePath: string): Promise<JSZip> {
+  if (path.extname(archivePath).toLowerCase() !== ".zip") {
+    throw new Error("Only ZIP archives are supported in this build.");
+  }
+  const data = await fsp.readFile(archivePath);
+  return JSZip.loadAsync(data);
+}
+
+function getZipEntrySize(entry: JSZip.JSZipObject): number {
+  const unsafeEntry = entry as JSZip.JSZipObject & { _data?: { uncompressedSize?: number } };
+  return unsafeEntry._data?.uncompressedSize ?? 0;
+}
+
+function normalizeArchivePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function normalizeArchiveDirectory(value: string): string {
+  const normalized = normalizeArchivePath(value);
+  if (!normalized) return "";
+  return normalized.endsWith("/") ? normalized : `${normalized}/`;
+}
+
+function toArchivePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function ensureZipExtension(filePath: string): string {
+  return path.extname(filePath).toLowerCase() === ".zip" ? filePath : `${filePath}.zip`;
+}
+
+function safeDestinationPath(destinationRoot: string, archiveInternalPath: string): string {
+  const targetPath = path.resolve(destinationRoot, ...normalizeArchivePath(archiveInternalPath).split("/").filter(Boolean));
+  const relative = path.relative(destinationRoot, targetPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Archive entry escapes the destination folder.");
+  }
+  return targetPath;
 }
 
 export async function openTerminal(directoryPath: string): Promise<OperationResult> {
