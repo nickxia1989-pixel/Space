@@ -1053,13 +1053,15 @@ button:disabled {
 }
 
 .color-rules-modal,
-.quick-launch-modal {
+.quick-launch-modal,
+.action-settings-modal {
   width: min(980px, 100%);
 }
 
 .new-file-body,
 .color-rules-body,
-.quick-launch-body {
+.quick-launch-body,
+.action-settings-body {
   min-height: 0;
   display: grid;
   gap: 12px;
@@ -1077,6 +1079,10 @@ button:disabled {
 
 .quick-launch-body {
   grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.action-settings-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .template-list,
@@ -1278,6 +1284,71 @@ button:disabled {
   border-radius: 6px;
   background: rgba(158, 231, 215, 0.12);
   color: #b7f0e6;
+  font-size: 11px;
+}
+
+.action-surface-editor {
+  min-width: 0;
+  min-height: 0;
+  max-height: 520px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.action-surface-editor legend {
+  padding: 0 6px;
+  color: #cfeae3;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.action-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 0;
+}
+
+.action-row + .action-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.action-row label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8f9db2;
+  font-size: 12px;
+}
+
+.action-row.enabled label {
+  color: #e8eff9;
+}
+
+.action-row label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-row-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.action-row-buttons button {
+  min-width: 0;
+  height: 26px;
+  padding: 0 5px;
   font-size: 11px;
 }
 

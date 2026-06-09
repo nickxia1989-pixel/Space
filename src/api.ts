@@ -37,8 +37,47 @@ const mockKnownLocations: KnownLocation[] = [
   { id: "pictures", label: "Pictures", path: `${mockHome}\\Pictures`, icon: "image" }
 ];
 
+const mockWorkspaceStorageKey = "space.mock.workspace";
 let mockWorkspace: WorkspaceDocument | null = null;
 const mockEntries = new Map<string, FileEntry[]>();
+
+function getMockStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function loadMockWorkspace(): WorkspaceDocument | null {
+  const storage = getMockStorage();
+  if (!storage) return mockWorkspace;
+  const raw = storage.getItem(mockWorkspaceStorageKey);
+  if (!raw) {
+    mockWorkspace = null;
+    return null;
+  }
+  try {
+    mockWorkspace = JSON.parse(raw) as WorkspaceDocument;
+    return mockWorkspace;
+  } catch {
+    storage.removeItem(mockWorkspaceStorageKey);
+    mockWorkspace = null;
+    return null;
+  }
+}
+
+function saveMockWorkspace(snapshot: WorkspaceDocument): void {
+  mockWorkspace = snapshot;
+  const storage = getMockStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(mockWorkspaceStorageKey, JSON.stringify(snapshot));
+  } catch {
+    // Ignore quota and privacy-mode errors in the browser demo fallback.
+  }
+}
 
 function createMockEntry(parent: string, name: string, isDirectory: boolean, size = 0): FileEntry {
   const filePath = `${parent}\\${name}`;
@@ -307,10 +346,10 @@ function createBrowserMockApi(): SpaceApi {
       return mockResult(`Launched ${request.item.label}.`, [request.currentPath, ...request.selectedPaths]);
     },
     async getWorkspace() {
-      return mockWorkspace;
+      return loadMockWorkspace();
     },
     async saveWorkspace(snapshot: WorkspaceDocument) {
-      mockWorkspace = snapshot;
+      saveMockWorkspace(snapshot);
       return mockResult("Workspace saved.");
     }
   };

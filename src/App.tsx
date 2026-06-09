@@ -30,6 +30,7 @@ import {
   Rows3,
   Scissors,
   Search,
+  SlidersHorizontal,
   Star,
   Terminal,
   Trash2,
@@ -140,6 +141,66 @@ const quickLaunchVariableTokens = [
   "{firstName}",
   "{selectedNames}"
 ];
+const defaultToolbarActionIds = [
+  "newFolder",
+  "newFile",
+  "copy",
+  "cut",
+  "paste",
+  "delete",
+  "createZip",
+  "batchRename",
+  "folderSync",
+  "addShelf",
+  "colorRules",
+  "quickLaunch",
+  "refresh",
+  "terminal",
+  "bookmark"
+];
+const defaultContextMenuActionIds = [
+  "copy",
+  "cut",
+  "paste",
+  "rename",
+  "delete",
+  "hash",
+  "addShelf",
+  "quickLaunch",
+  "terminal",
+  "reveal"
+];
+const toolbarActionCatalog = [
+  { id: "newFolder", label: "New Folder" },
+  { id: "newFile", label: "New File" },
+  { id: "copy", label: "Copy" },
+  { id: "cut", label: "Cut" },
+  { id: "paste", label: "Paste" },
+  { id: "delete", label: "Delete" },
+  { id: "createZip", label: "Create ZIP Archive" },
+  { id: "batchRename", label: "Batch Rename" },
+  { id: "folderSync", label: "Folder Sync" },
+  { id: "addShelf", label: "Add To Shelf" },
+  { id: "colorRules", label: "Color Rules" },
+  { id: "quickLaunch", label: "Quick Launch" },
+  { id: "refresh", label: "Refresh" },
+  { id: "terminal", label: "Open Terminal" },
+  { id: "bookmark", label: "Add Bookmark" }
+];
+const contextMenuActionCatalog = [
+  { id: "copy", label: "Copy" },
+  { id: "cut", label: "Cut" },
+  { id: "paste", label: "Paste" },
+  { id: "rename", label: "Rename" },
+  { id: "delete", label: "Delete" },
+  { id: "hash", label: "Calculate SHA-256" },
+  { id: "addShelf", label: "Add To Shelf" },
+  { id: "quickLaunch", label: "Quick Launch" },
+  { id: "terminal", label: "Open Terminal" },
+  { id: "reveal", label: "Reveal In Explorer" }
+];
+
+type ActionCatalogItem = { id: string; label: string };
 
 const defaultFileTemplates: NewFileTemplate[] = [
   {
@@ -216,6 +277,19 @@ function createQuickLaunchItem(label = "PowerShell Here"): QuickLaunchItem {
   };
 }
 
+function normalizeActionIds(input: string[] | undefined, defaults: string[], catalog: ActionCatalogItem[]): string[] {
+  const validIds = new Set(catalog.map((item) => item.id));
+  if (!input) return defaults;
+  const seen = new Set<string>();
+  const normalized = input.filter((id) => {
+    if (!validIds.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  if (input.length === 0) return [];
+  return normalized.length > 0 ? normalized : defaults;
+}
+
 function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapshot {
   return {
     id,
@@ -285,6 +359,8 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     fileTemplates: [],
     colorRules: [],
     quickLaunchItems: [createQuickLaunchItem()],
+    toolbarActionIds: defaultToolbarActionIds,
+    contextMenuActionIds: defaultContextMenuActionIds,
     savedAt: Date.now()
   };
 }
@@ -302,6 +378,8 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     fileTemplates: record.fileTemplates ?? [],
     colorRules: record.colorRules ?? [],
     quickLaunchItems: record.quickLaunchItems ?? [createQuickLaunchItem()],
+    toolbarActionIds: normalizeActionIds(record.toolbarActionIds, defaultToolbarActionIds, toolbarActionCatalog),
+    contextMenuActionIds: normalizeActionIds(record.contextMenuActionIds, defaultContextMenuActionIds, contextMenuActionCatalog),
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -372,6 +450,8 @@ export default function App() {
   const [fileTemplates, setFileTemplates] = useState<NewFileTemplate[]>([]);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [quickLaunchItems, setQuickLaunchItems] = useState<QuickLaunchItem[]>([]);
+  const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
+  const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -384,6 +464,7 @@ export default function App() {
   const [colorRulesOpen, setColorRulesOpen] = useState(false);
   const [quickLaunchMenuOpen, setQuickLaunchMenuOpen] = useState(false);
   const [quickLaunchEditorOpen, setQuickLaunchEditorOpen] = useState(false);
+  const [actionSettingsOpen, setActionSettingsOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
@@ -416,6 +497,8 @@ export default function App() {
         setFileTemplates(workspace.fileTemplates ?? []);
         setColorRules(workspace.colorRules ?? []);
         setQuickLaunchItems(workspace.quickLaunchItems ?? []);
+        setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
+        setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -468,19 +551,15 @@ export default function App() {
         fileTemplates,
         colorRules,
         quickLaunchItems,
+        toolbarActionIds,
+        contextMenuActionIds,
         savedAt: Date.now()
       };
-      const workspaceDocument: WorkspaceDocument = {
-        activeWorkspaceId,
-        workspaces: workspaces.map((workspace) =>
-          workspace.id === activeWorkspaceId ? { ...workspace, ...snapshot } : workspace
-        ),
-        savedAt: Date.now()
-      };
-      void api.saveWorkspace(workspaceDocument);
+      const workspaceDocument = createWorkspaceDocument(snapshot);
+      if (workspaceDocument) void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -515,8 +594,30 @@ export default function App() {
       fileTemplates,
       colorRules,
       quickLaunchItems,
+      toolbarActionIds,
+      contextMenuActionIds,
       savedAt: Date.now()
     };
+  }
+
+  function createWorkspaceDocument(snapshot: WorkspaceSnapshot, records = workspaces): WorkspaceDocument | null {
+    if (!activeWorkspaceId || panes.length !== 4 || records.length === 0) return null;
+    const savedAt = Date.now();
+    const workspaceSnapshot = { ...snapshot, savedAt };
+    return {
+      activeWorkspaceId,
+      workspaces: records.map((workspace) =>
+        workspace.id === activeWorkspaceId ? { ...workspace, ...workspaceSnapshot } : workspace
+      ),
+      savedAt
+    };
+  }
+
+  function persistCurrentWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
+    const workspaceDocument = createWorkspaceDocument(snapshot);
+    if (!workspaceDocument) return;
+    setWorkspaces(workspaceDocument.workspaces);
+    void api.saveWorkspace(workspaceDocument);
   }
 
   function saveCurrentWorkspaceToList(records = workspaces): WorkspaceRecord[] {
@@ -534,6 +635,8 @@ export default function App() {
     setFileTemplates(workspace.fileTemplates ?? []);
     setColorRules(workspace.colorRules ?? []);
     setQuickLaunchItems(workspace.quickLaunchItems ?? []);
+    setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
+    setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
@@ -1080,6 +1183,30 @@ export default function App() {
     }
   }
 
+  const toolbarActions: Record<string, { title: string; icon: LucideIcon; onClick: () => void; disabled?: boolean; active?: boolean }> = {
+    newFolder: { title: "New folder", icon: FolderPlus, onClick: () => void createItem("folder") },
+    newFile: { title: "New file", icon: FilePlus2, onClick: () => setNewFileOpen(true) },
+    copy: { title: "Copy", icon: Copy, onClick: () => copySelection("copy"), disabled: !activePane?.selectedPaths.length },
+    cut: { title: "Cut", icon: Scissors, onClick: () => copySelection("cut"), disabled: !activePane?.selectedPaths.length },
+    paste: { title: "Paste", icon: FileText, onClick: () => void pasteInto(), disabled: !clipboard?.paths.length },
+    delete: { title: "Delete", icon: Trash2, onClick: () => void deleteSelected(), disabled: !activePane?.selectedPaths.length },
+    createZip: { title: "Create ZIP archive", icon: Archive, onClick: () => void createArchiveFromSelection(), disabled: !activePane?.selectedPaths.length },
+    batchRename: { title: "Batch rename", icon: FileText, onClick: () => setBatchRenameOpen(true), disabled: !activePane?.selectedPaths.length },
+    folderSync: { title: "Folder sync", icon: RefreshCcw, onClick: () => setFolderSyncOpen(true), disabled: !activePane },
+    addShelf: { title: "Add selection to shelf", icon: Plus, onClick: addSelectionToShelf, disabled: !activePane?.selectedPaths.length },
+    colorRules: { title: "Color rules", icon: Palette, onClick: () => setColorRulesOpen(true), active: colorRules.some((rule) => rule.enabled) },
+    quickLaunch: {
+      title: "Quick launch",
+      icon: Rocket,
+      onClick: () => setQuickLaunchMenuOpen((open) => !open),
+      active: quickLaunchMenuOpen,
+      disabled: !activePane
+    },
+    refresh: { title: "Refresh", icon: RefreshCcw, onClick: () => void refreshPane() },
+    terminal: { title: "Open terminal", icon: Terminal, onClick: () => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), []) },
+    bookmark: { title: "Add bookmark", icon: Star, onClick: addBookmark }
+  };
+
   if (!bootstrap || panes.length !== 4) {
     return (
       <main className="loading-screen">
@@ -1103,27 +1230,24 @@ export default function App() {
         </div>
 
         <div className="toolbar" role="toolbar" aria-label="File operations">
-          <IconButton title="New folder" onClick={() => void createItem("folder")} icon={FolderPlus} />
-          <IconButton title="New file" onClick={() => setNewFileOpen(true)} icon={FilePlus2} />
-          <span className="toolbar-divider" />
-          <IconButton title="Copy" onClick={() => copySelection("copy")} icon={Copy} disabled={!activePane?.selectedPaths.length} />
-          <IconButton title="Cut" onClick={() => copySelection("cut")} icon={Scissors} disabled={!activePane?.selectedPaths.length} />
-          <IconButton title="Paste" onClick={() => void pasteInto()} icon={FileText} disabled={!clipboard?.paths.length} />
-          <IconButton title="Delete" onClick={() => void deleteSelected()} icon={Trash2} disabled={!activePane?.selectedPaths.length} />
-          <span className="toolbar-divider" />
-          <IconButton title="Create ZIP archive" onClick={() => void createArchiveFromSelection()} icon={Archive} disabled={!activePane?.selectedPaths.length} />
-          <IconButton title="Batch rename" onClick={() => setBatchRenameOpen(true)} icon={FileText} disabled={!activePane?.selectedPaths.length} />
-          <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
-          <IconButton title="Add selection to shelf" onClick={addSelectionToShelf} icon={Plus} disabled={!activePane?.selectedPaths.length} />
-          <IconButton title="Color rules" onClick={() => setColorRulesOpen(true)} icon={Palette} active={colorRules.some((rule) => rule.enabled)} />
-          <IconButton title="Quick launch" onClick={() => setQuickLaunchMenuOpen((open) => !open)} icon={Rocket} active={quickLaunchMenuOpen} disabled={!activePane} />
-          <span className="toolbar-divider" />
-          <IconButton title="Refresh" onClick={() => void refreshPane()} icon={RefreshCcw} />
-          <IconButton title="Open terminal" onClick={() => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), [])} icon={Terminal} />
-          <IconButton title="Add bookmark" onClick={addBookmark} icon={Star} />
+          {toolbarActionIds.map((actionId) => {
+            const action = toolbarActions[actionId];
+            if (!action) return null;
+            return (
+              <IconButton
+                key={actionId}
+                title={action.title}
+                onClick={action.onClick}
+                icon={action.icon}
+                disabled={action.disabled}
+                active={action.active}
+              />
+            );
+          })}
         </div>
 
         <div className="layout-switcher" aria-label="Layout">
+          <IconButton title="Customize actions" onClick={() => setActionSettingsOpen(true)} icon={SlidersHorizontal} />
           <IconButton title="Grid layout" onClick={() => setLayout("grid")} icon={Grid2X2} active={layout === "grid"} />
           <IconButton title="Columns layout" onClick={() => setLayout("columns")} icon={Columns3} active={layout === "columns"} />
           <IconButton title="Rows layout" onClick={() => setLayout("rows")} icon={Rows3} active={layout === "rows"} />
@@ -1236,6 +1360,7 @@ export default function App() {
       {contextMenu && (
         <ContextMenu
           state={contextMenu}
+          actionIds={contextMenuActionIds}
           onCopy={() => copySelection("copy")}
           onCut={() => copySelection("cut")}
           onPaste={() => void pasteInto(contextMenu.paneId)}
@@ -1244,6 +1369,15 @@ export default function App() {
           onHash={() => void calculateSelectedHash("sha256")}
           onAddToShelf={addSelectionToShelf}
           onReveal={() => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), [])}
+          onOpenTerminal={() => {
+            const pane = panes.find((item) => item.id === contextMenu.paneId);
+            if (pane) void perform("Terminal", () => api.openTerminal(pane.path), []);
+          }}
+          onQuickLaunch={() => {
+            setActivePaneId(contextMenu.paneId);
+            setContextMenu(null);
+            setQuickLaunchMenuOpen(true);
+          }}
           canPaste={!!clipboard?.paths.length}
           canAct={!!activePane?.selectedPaths.length}
         />
@@ -1279,6 +1413,27 @@ export default function App() {
             setQuickLaunchItems(items);
             setQuickLaunchEditorOpen(false);
             showToast("success", "Quick Launch items saved.");
+          }}
+        />
+      )}
+
+      {actionSettingsOpen && (
+        <ActionSettingsModal
+          toolbarIds={toolbarActionIds}
+          contextMenuIds={contextMenuActionIds}
+          onClose={() => setActionSettingsOpen(false)}
+          onSave={(nextToolbarIds, nextContextMenuIds) => {
+            const nextSnapshot: WorkspaceSnapshot = {
+              ...getCurrentWorkspaceSnapshot(),
+              toolbarActionIds: nextToolbarIds,
+              contextMenuActionIds: nextContextMenuIds,
+              savedAt: Date.now()
+            };
+            setToolbarActionIds(nextToolbarIds);
+            setContextMenuActionIds(nextContextMenuIds);
+            persistCurrentWorkspaceSnapshot(nextSnapshot);
+            setActionSettingsOpen(false);
+            showToast("success", "Action layout saved.");
           }}
         />
       )}
@@ -2608,6 +2763,122 @@ function ColorRulesModal({
   );
 }
 
+function ActionSettingsModal({
+  toolbarIds,
+  contextMenuIds,
+  onClose,
+  onSave
+}: {
+  toolbarIds: string[];
+  contextMenuIds: string[];
+  onClose: () => void;
+  onSave: (toolbarIds: string[], contextMenuIds: string[]) => void;
+}) {
+  const [draftToolbarIds, setDraftToolbarIds] = useState(() => normalizeActionIds(toolbarIds, defaultToolbarActionIds, toolbarActionCatalog));
+  const [draftContextIds, setDraftContextIds] = useState(() => normalizeActionIds(contextMenuIds, defaultContextMenuActionIds, contextMenuActionCatalog));
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal action-settings-modal" role="dialog" aria-modal="true" aria-label="Customize actions">
+        <header className="modal-header">
+          <div>
+            <h2>Customize Actions</h2>
+            <span>Choose and arrange workspace toolbar and context menu actions.</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="action-settings-body">
+          <ActionSurfaceEditor
+            title="Toolbar"
+            catalog={toolbarActionCatalog}
+            selectedIds={draftToolbarIds}
+            onChange={setDraftToolbarIds}
+          />
+          <ActionSurfaceEditor
+            title="Context Menu"
+            catalog={contextMenuActionCatalog}
+            selectedIds={draftContextIds}
+            onChange={setDraftContextIds}
+          />
+        </div>
+
+        <footer className="modal-footer">
+          <button
+            onClick={() => {
+              setDraftToolbarIds(defaultToolbarActionIds);
+              setDraftContextIds(defaultContextMenuActionIds);
+            }}
+          >
+            Restore Defaults
+          </button>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={() => onSave(draftToolbarIds, draftContextIds)}>
+            Save Layout
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function ActionSurfaceEditor({
+  title,
+  catalog,
+  selectedIds,
+  onChange
+}: {
+  title: string;
+  catalog: ActionCatalogItem[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  function toggle(id: string, enabled: boolean) {
+    if (enabled) {
+      onChange(selectedIds.includes(id) ? selectedIds : [...selectedIds, id]);
+    } else {
+      const nextIds = selectedIds.filter((item) => item !== id);
+      onChange(nextIds);
+    }
+  }
+
+  return (
+    <fieldset className="action-surface-editor">
+      <legend>{title}</legend>
+      {catalog.map((item) => {
+        const enabled = selectedIds.includes(item.id);
+        const index = selectedIds.indexOf(item.id);
+        return (
+          <div key={item.id} className={`action-row ${enabled ? "enabled" : ""}`}>
+            <label>
+              <input type="checkbox" checked={enabled} onChange={(event) => toggle(item.id, event.target.checked)} />
+              <span>{item.label}</span>
+            </label>
+            <div className="action-row-buttons">
+              <button disabled={!enabled || index <= 0} onClick={() => onChange(moveActionId(selectedIds, item.id, -1))}>
+                Up
+              </button>
+              <button disabled={!enabled || index === selectedIds.length - 1} onClick={() => onChange(moveActionId(selectedIds, item.id, 1))}>
+                Down
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+function moveActionId(ids: string[], id: string, direction: -1 | 1): string[] {
+  const index = ids.indexOf(id);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return ids;
+  const nextIds = [...ids];
+  const [item] = nextIds.splice(index, 1);
+  nextIds.splice(nextIndex, 0, item);
+  return nextIds;
+}
+
 function expandDatePreview(value: string, date = new Date()): string {
   return value.replace(/\$date\(([^)]+)\)/g, (_match, format: string) => formatDatePreview(format, date));
 }
@@ -2952,6 +3223,7 @@ function FolderSyncModal({
 
 function ContextMenu({
   state,
+  actionIds,
   onCopy,
   onCut,
   onPaste,
@@ -2960,10 +3232,13 @@ function ContextMenu({
   onHash,
   onAddToShelf,
   onReveal,
+  onOpenTerminal,
+  onQuickLaunch,
   canPaste,
   canAct
 }: {
   state: ContextMenuState;
+  actionIds: string[];
   onCopy: () => void;
   onCut: () => void;
   onPaste: () => void;
@@ -2972,19 +3247,34 @@ function ContextMenu({
   onHash: () => void;
   onAddToShelf: () => void;
   onReveal: () => void;
+  onOpenTerminal: () => void;
+  onQuickLaunch: () => void;
   canPaste: boolean;
   canAct: boolean;
 }) {
+  const actions: Record<string, { label: string; disabled?: boolean; onClick: () => void }> = {
+    copy: { label: "Copy", disabled: !canAct, onClick: onCopy },
+    cut: { label: "Cut", disabled: !canAct, onClick: onCut },
+    paste: { label: `Paste into Pane ${state.paneId}`, disabled: !canPaste, onClick: onPaste },
+    rename: { label: "Rename", disabled: !canAct, onClick: onRename },
+    delete: { label: "Delete", disabled: !canAct, onClick: onDelete },
+    hash: { label: "Calculate SHA-256", disabled: !canAct, onClick: onHash },
+    addShelf: { label: "Add to Shelf", disabled: !canAct, onClick: onAddToShelf },
+    quickLaunch: { label: "Quick Launch...", onClick: onQuickLaunch },
+    terminal: { label: "Open Terminal", onClick: onOpenTerminal },
+    reveal: { label: "Reveal in Explorer", disabled: !canAct, onClick: onReveal }
+  };
   return (
     <div className="context-menu" style={{ left: state.x, top: state.y }}>
-      <button disabled={!canAct} onClick={onCopy}>Copy</button>
-      <button disabled={!canAct} onClick={onCut}>Cut</button>
-      <button disabled={!canPaste} onClick={onPaste}>Paste into Pane {state.paneId}</button>
-      <button disabled={!canAct} onClick={onRename}>Rename</button>
-      <button disabled={!canAct} onClick={onDelete}>Delete</button>
-      <button disabled={!canAct} onClick={onHash}>Calculate SHA-256</button>
-      <button disabled={!canAct} onClick={onAddToShelf}>Add to Shelf</button>
-      <button disabled={!canAct} onClick={onReveal}>Reveal in Explorer</button>
+      {actionIds.map((actionId) => {
+        const action = actions[actionId];
+        if (!action) return null;
+        return (
+          <button key={actionId} disabled={action.disabled} onClick={action.onClick}>
+            {action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

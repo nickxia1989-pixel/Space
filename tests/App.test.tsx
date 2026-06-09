@@ -1,7 +1,13 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
+import type { WorkspaceDocument } from "../src/shared";
+
+function readSavedWorkspace(): WorkspaceDocument | null {
+  const raw = window.localStorage.getItem("space.mock.workspace");
+  return raw ? (JSON.parse(raw) as WorkspaceDocument) : null;
+}
 
 describe("App", () => {
   it("renders four explorer panes with default controls", async () => {
@@ -132,5 +138,42 @@ describe("App", () => {
     await user.click(screen.getByLabelText("Quick launch"));
     await user.click(within(screen.getByRole("region", { name: "Quick Launch" })).getByRole("button", { name: "Manage" }));
     expect(screen.getByRole("dialog", { name: "Quick Launch settings" })).toBeInTheDocument();
+  });
+
+  it("customizes toolbar and context menu actions", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Customize actions")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Customize actions"));
+
+    const dialog = screen.getByRole("dialog", { name: "Customize actions" });
+    const toolbarGroup = within(dialog).getByRole("group", { name: "Toolbar" });
+    await user.click(within(toolbarGroup).getByLabelText("Delete"));
+    await user.click(within(dialog).getByRole("button", { name: "Save Layout" }));
+
+    expect(screen.queryByLabelText("Delete")).not.toBeInTheDocument();
+    await waitFor(() => {
+      const toolbarIds = readSavedWorkspace()?.workspaces[0]?.toolbarActionIds;
+      expect(toolbarIds).toBeDefined();
+      expect(toolbarIds).not.toContain("delete");
+    });
+
+    await user.click(screen.getByLabelText("Customize actions"));
+    const secondDialog = screen.getByRole("dialog", { name: "Customize actions" });
+    const contextGroup = within(secondDialog).getByRole("group", { name: "Context Menu" });
+    await user.click(within(contextGroup).getByLabelText("Delete"));
+    await user.click(within(secondDialog).getByRole("button", { name: "Save Layout" }));
+    await waitFor(() => {
+      const contextMenuIds = readSavedWorkspace()?.workspaces[0]?.contextMenuActionIds;
+      expect(contextMenuIds).toBeDefined();
+      expect(contextMenuIds).not.toContain("delete");
+    });
+
+    fireEvent.contextMenu(screen.getByText("Space Notes.md"));
+    const contextMenu = document.querySelector(".context-menu");
+    expect(contextMenu).not.toBeNull();
+    expect(within(contextMenu as HTMLElement).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(within(contextMenu as HTMLElement).getByRole("button", { name: "Quick Launch..." })).toBeInTheDocument();
   });
 });

@@ -136,6 +136,8 @@ export interface WorkspaceSnapshot {
   fileTemplates?: NewFileTemplate[];
   colorRules?: ColorRule[];
   quickLaunchItems?: QuickLaunchItem[];
+  toolbarActionIds?: string[];
+  contextMenuActionIds?: string[];
   savedAt: number;
 }
 
