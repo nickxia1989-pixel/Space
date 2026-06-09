@@ -329,6 +329,32 @@ describe("App", () => {
     confirmSpy.mockRestore();
   });
 
+  it("recovers panes that are showing a moved folder", async () => {
+    const user = userEvent.setup();
+    const homePath = "C:\\Users\\Traveler";
+    const desktopPath = `${homePath}\\Desktop`;
+    const downloadsPath = `${homePath}\\Downloads`;
+    writeWorkspaceWithPanePaths([homePath, desktopPath, downloadsPath, `${homePath}\\Documents`]);
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    const pane3 = await screen.findByLabelText("Pane 3");
+    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane3).getByText("Archive.zip")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Desktop"));
+    await user.click(screen.getByLabelText("Cut"));
+    await user.click(pane3);
+    await user.click(screen.getByLabelText("Paste"));
+
+    expect(await screen.findByText("Moved 1 item(s).")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane2).getByDisplayValue(`${downloadsPath}\\Desktop`)).toBeInTheDocument());
+    expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument();
+    expect(pane3).toHaveClass("active");
+  });
+
   it("opens advanced batch rename and folder sync panels", async () => {
     const user = userEvent.setup();
     render(<App />);

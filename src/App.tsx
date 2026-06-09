@@ -855,14 +855,18 @@ export default function App() {
     return pane ? pane.entries.filter((entry) => containsPath(pane.selectedPaths, entry.path)) : [];
   }
 
+  function normalizedPathKey(filePath: string): string {
+    return trimTrailingSeparator(filePath.trim()).replace(/[\\/]+/g, "\\").toLowerCase();
+  }
+
   function paneIdsForPaths(paths: string[]): number[] {
-    const pathKeys = new Set(paths.map((item) => item.trim().toLowerCase()).filter(Boolean));
-    return panes.filter((pane) => pathKeys.has(pane.path.toLowerCase())).map((pane) => pane.id);
+    const pathKeys = new Set(paths.map(normalizedPathKey).filter(Boolean));
+    return panes.filter((pane) => pathKeys.has(normalizedPathKey(pane.path))).map((pane) => pane.id);
   }
 
   function sameOrChildPath(candidate: string, parent: string): boolean {
-    const normalizedCandidate = trimTrailingSeparator(candidate).replace(/[\\/]+/g, "\\").toLowerCase();
-    const normalizedParent = trimTrailingSeparator(parent).replace(/[\\/]+/g, "\\").toLowerCase();
+    const normalizedCandidate = normalizedPathKey(candidate);
+    const normalizedParent = normalizedPathKey(parent);
     return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}\\`);
   }
 
@@ -877,6 +881,37 @@ export default function App() {
         .sort((left, right) => right.length - left.length)[0];
       return deletedRoot ? [{ paneId: pane.id, fallbackPath: parentPath(deletedRoot) }] : [];
     });
+  }
+
+  function movedPathPairs(sources: string[], destination: string, affectedPaths: string[] | undefined): Array<{ sourcePath: string; targetPath: string }> {
+    const movedSources = sources.filter((source) => normalizedPathKey(parentPath(source)) !== normalizedPathKey(destination));
+    return movedSources.slice(0, affectedPaths?.length ?? 0).map((sourcePath, index) => ({
+      sourcePath,
+      targetPath: affectedPaths![index]
+    }));
+  }
+
+  function replacePathRoot(candidate: string, sourceRoot: string, targetRoot: string): string {
+    if (normalizedPathKey(candidate) === normalizedPathKey(sourceRoot)) return targetRoot;
+    const source = trimTrailingSeparator(sourceRoot);
+    const suffix = trimTrailingSeparator(candidate).slice(source.length).replace(/[\\/]+/g, "\\");
+    return `${trimTrailingSeparator(targetRoot)}${suffix}`;
+  }
+
+  function movedPathRecoveryTargets(moves: Array<{ sourcePath: string; targetPath: string }>): Array<{ paneId: number; targetPath: string }> {
+    return panes.flatMap((pane) => {
+      const move = moves
+        .filter((item) => sameOrChildPath(pane.path, item.sourcePath))
+        .sort((left, right) => right.sourcePath.length - left.sourcePath.length)[0];
+      return move ? [{ paneId: pane.id, targetPath: replacePathRoot(pane.path, move.sourcePath, move.targetPath) }] : [];
+    });
+  }
+
+  async function recoverMovedPanes(sources: string[], destination: string, result: OperationResult | true): Promise<void> {
+    if (result === true || !result.affectedPaths?.length) return;
+    const moves = movedPathPairs(sources, destination, result.affectedPaths);
+    if (!moves.length) return;
+    await Promise.all(movedPathRecoveryTargets(moves).map((target) => loadPane(target.paneId, target.targetPath, "replace", false)));
   }
 
   function nextPaneLoadRequest(paneId: number): number {
@@ -1216,13 +1251,13 @@ export default function App() {
     }
   }
 
-  async function refreshPane(paneId = activePaneId) {
+  async function refreshPane(paneId = activePaneId, activate = true) {
     const pane = panes.find((item) => item.id === paneId);
     if (!pane) return;
     if (pane.recursiveSearch && pane.filter.trim()) {
       await runSearch(paneId);
     } else {
-      await loadPane(paneId, pane.path, "replace");
+      await loadPane(paneId, pane.path, "replace", activate);
     }
   }
 
@@ -1295,7 +1330,7 @@ export default function App() {
     label: string,
     action: () => Promise<OperationResult | unknown>,
     refreshIds: number[] = [activePaneId]
-  ): Promise<boolean> {
+  ): Promise<OperationResult | true | null> {
     try {
       const result = await action();
       const message =
@@ -1303,11 +1338,11 @@ export default function App() {
           ? String((result as OperationResult).message)
           : `${label} complete.`;
       showToast("success", message);
-      await Promise.all([...new Set(refreshIds)].map((id) => refreshPane(id)));
-      return true;
+      await Promise.all([...new Set(refreshIds)].map((id) => refreshPane(id, false)));
+      return typeof result === "object" && result && "message" in result ? (result as OperationResult) : true;
     } catch (error) {
       showToast("error", `${label} failed: ${getErrorMessage(error)}`);
-      return false;
+      return null;
     }
   }
 
@@ -1412,13 +1447,18 @@ export default function App() {
   async function pasteInto(paneId = activePaneId) {
     const pane = panes.find((item) => item.id === paneId);
     if (!pane || !clipboard?.paths.length) return;
+    const sources = [...clipboard.paths];
+    const destination = pane.path;
     const operation = clipboard.mode === "copy" ? api.copyItems : api.moveItems;
-    const succeeded = await perform(
+    const result = await perform(
       clipboard.mode === "copy" ? "Paste copy" : "Paste move",
-      () => operation({ sources: clipboard.paths, destination: pane.path }),
+      () => operation({ sources, destination }),
       paneIds
     );
-    if (succeeded && clipboard.mode === "cut") setClipboard(null);
+    if (result && clipboard.mode === "cut") {
+      setClipboard(null);
+      await recoverMovedPanes(sources, destination, result);
+    }
   }
 
   async function sendSelectionToPane(sourcePaneId: number, targetPaneId: number, mode: ClipboardMode) {
@@ -1426,15 +1466,18 @@ export default function App() {
     if (!sourcePane || !sourcePane.selectedPaths.length || targetPaneId === sourcePane.id) return;
     const targetPane = panes.find((pane) => pane.id === targetPaneId);
     if (!targetPane) return;
+    const sources = [...sourcePane.selectedPaths];
+    const destination = targetPane.path;
     setActivePaneId(sourcePane.id);
-    await perform(
+    const result = await perform(
       mode === "copy" ? "Copy to pane" : "Move to pane",
       () =>
         mode === "copy"
-          ? api.copyItems({ sources: sourcePane.selectedPaths, destination: targetPane.path })
-          : api.moveItems({ sources: sourcePane.selectedPaths, destination: targetPane.path }),
+          ? api.copyItems({ sources, destination })
+          : api.moveItems({ sources, destination }),
       [sourcePane.id, targetPaneId]
     );
+    if (result && mode === "cut") await recoverMovedPanes(sources, destination, result);
   }
 
   async function createItem(kind: "file" | "folder") {
@@ -1461,7 +1504,7 @@ export default function App() {
     try {
       const result = await api.createFile({ parentPath, name: request.name, content: request.content });
       showToast("success", `Created ${result.name}.`);
-      await Promise.all(refreshIds.map((id) => refreshPane(id)));
+      await Promise.all(refreshIds.map((id) => refreshPane(id, false)));
       const savedTemplateName = request.saveTemplateName?.trim();
       if (savedTemplateName) {
         setFileTemplates((current) => [
@@ -1530,7 +1573,7 @@ export default function App() {
       const message = result.message ?? "Batch rename complete.";
       saveBatchRenameHistory([createBatchRenameHistoryEntry(rule, preview, message), ...batchRenameHistory]);
       showToast("success", message);
-      await Promise.all(refreshIds.map((id) => refreshPane(id)));
+      await Promise.all(refreshIds.map((id) => refreshPane(id, false)));
       setBatchRenameOpen(false);
     } catch (error) {
       showToast("error", `Batch rename failed: ${getErrorMessage(error)}`);
@@ -1663,13 +1706,15 @@ export default function App() {
     if (!activePane || stashItems.length === 0) return;
     try {
       const sources = stashItems.map((item) => item.path);
+      const destination = activePane.path;
       const result =
         mode === "copy"
-          ? await api.copyItems({ sources, destination: activePane.path })
-          : await api.moveItems({ sources, destination: activePane.path });
+          ? await api.copyItems({ sources, destination })
+          : await api.moveItems({ sources, destination });
       showToast("success", result.message);
       if (mode === "cut") setStashItems([]);
-      await Promise.all((mode === "cut" ? paneIds : [activePane.id]).map((id) => refreshPane(id)));
+      await Promise.all((mode === "cut" ? paneIds : [activePane.id]).map((id) => refreshPane(id, false)));
+      if (mode === "cut") await recoverMovedPanes(sources, destination, result);
     } catch (error) {
       showToast("error", `Shelf ${mode === "copy" ? "copy" : "move"} failed: ${getErrorMessage(error)}`);
     }
@@ -1727,7 +1772,9 @@ export default function App() {
           ? api.copyItems({ sources, destination: targetPane.path })
           : api.moveItems({ sources, destination: targetPane.path }),
       paneIds
-    );
+    ).then((result) => {
+      if (result && mode === "cut") void recoverMovedPanes(sources, targetPane.path, result);
+    });
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
