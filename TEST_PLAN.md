@@ -4,7 +4,7 @@
 
 | Area | Evidence |
 | --- | --- |
-| Windows desktop app launches | `npm run smoke:electron` |
+| Windows desktop app launches | `npm run smoke:electron` verifies the packaged renderer reaches four visible panes |
 | Four explorer panes render | `tests/App.test.tsx`; browser DOM verification |
 | Modern responsive layout | Browser screenshot at `http://127.0.0.1:5188/`; overflow checks |
 | Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot; path suggestion tests |

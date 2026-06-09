@@ -49,6 +49,48 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let workspaceStore: WorkspaceStore;
 
+async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
+  try {
+    const result = (await window.webContents.executeJavaScript(
+      `new Promise((resolve) => {
+        const startedAt = Date.now();
+        const check = () => {
+          const root = document.querySelector("#root");
+          const paneCount = document.querySelectorAll("[aria-label^='Pane ']").length;
+          const appShell = document.querySelector(".app-shell");
+          const bodyText = document.body?.innerText?.trim() ?? "";
+          if (appShell && paneCount === 4) {
+            resolve({ ok: true, paneCount, bodyText: bodyText.slice(0, 240) });
+            return;
+          }
+          if (Date.now() - startedAt > 8000) {
+            resolve({
+              ok: false,
+              paneCount,
+              rootChildren: root?.childElementCount ?? -1,
+              bodyText: bodyText.slice(0, 500),
+              scripts: Array.from(document.scripts).map((script) => script.src)
+            });
+            return;
+          }
+          window.setTimeout(check, 100);
+        };
+        check();
+      })`
+    )) as { ok: boolean; paneCount: number; rootChildren?: number; bodyText?: string; scripts?: string[] };
+    if (!result.ok) {
+      console.error(`Smoke check failed: ${JSON.stringify(result)}`);
+      app.exit(1);
+      return;
+    }
+    console.log(`Smoke check passed: ${result.paneCount} panes rendered.`);
+    app.exit(0);
+  } catch (error) {
+    console.error(`Smoke check failed: ${error instanceof Error ? error.message : String(error)}`);
+    app.exit(1);
+  }
+}
+
 function createWindow(): void {
   const isSmokeTest = process.env.SPACE_SMOKE_TEST === "1";
   mainWindow = new BrowserWindow({
@@ -72,7 +114,12 @@ function createWindow(): void {
     if (!isSmokeTest) mainWindow?.show();
   });
   mainWindow.webContents.once("did-finish-load", () => {
-    if (isSmokeTest) app.quit();
+    if (isSmokeTest && mainWindow) void verifySmokeWindow(mainWindow);
+  });
+  mainWindow.webContents.once("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    if (!isSmokeTest) return;
+    console.error(`Smoke load failed: ${errorCode} ${errorDescription} ${validatedURL}`);
+    app.exit(1);
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
