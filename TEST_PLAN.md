@@ -15,7 +15,7 @@
 | Color Rules | `tests/App.test.tsx` rule creation and highlighted entry coverage; browser DOM style check |
 | Quick Launch | `tests/fileService.test.ts` variable/argument construction; `tests/App.test.tsx` panel run/settings coverage |
 | Custom toolbar/context menu/hotkeys | `tests/App.test.tsx` action visibility, context menu customization, context-menu target-pane actions, and hotkey trigger coverage |
-| Cross-pane transfer commands | `tests/App.test.tsx` clipboard copy/cut/paste across panes; renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
+| Cross-pane transfer commands | `tests/App.test.tsx` clipboard copy/cut/paste across panes and per-pane transfer button source targeting; renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
 | Workspace Search | `tests/App.test.tsx` workspace search modal coverage with de-duplicated mock results and Stash Shelf action |
 | Hash Compare | `tests/App.test.tsx` selected-file hash comparison modal coverage; `tests/fileService.test.ts` hash calculation coverage |

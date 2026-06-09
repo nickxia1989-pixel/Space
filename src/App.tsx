@@ -1390,17 +1390,19 @@ export default function App() {
     if (clipboard.mode === "cut") setClipboard(null);
   }
 
-  async function sendSelectionToPane(targetPaneId: number, mode: ClipboardMode) {
-    if (!activePane || !activePane.selectedPaths.length || targetPaneId === activePane.id) return;
+  async function sendSelectionToPane(sourcePaneId: number, targetPaneId: number, mode: ClipboardMode) {
+    const sourcePane = paneById(sourcePaneId);
+    if (!sourcePane || !sourcePane.selectedPaths.length || targetPaneId === sourcePane.id) return;
     const targetPane = panes.find((pane) => pane.id === targetPaneId);
     if (!targetPane) return;
+    setActivePaneId(sourcePane.id);
     await perform(
       mode === "copy" ? "Copy to pane" : "Move to pane",
       () =>
         mode === "copy"
-          ? api.copyItems({ sources: activePane.selectedPaths, destination: targetPane.path })
-          : api.moveItems({ sources: activePane.selectedPaths, destination: targetPane.path }),
-      [activePane.id, targetPaneId]
+          ? api.copyItems({ sources: sourcePane.selectedPaths, destination: targetPane.path })
+          : api.moveItems({ sources: sourcePane.selectedPaths, destination: targetPane.path }),
+      [sourcePane.id, targetPaneId]
     );
   }
 
@@ -1944,8 +1946,8 @@ export default function App() {
                 const payload = containsPath(pane.selectedPaths, entry.path) ? pane.selectedPaths : [entry.path];
                 event.dataTransfer.setData("application/x-space-paths", JSON.stringify(payload));
               }}
-              onCopyTo={(targetId) => void sendSelectionToPane(targetId, "copy")}
-              onMoveTo={(targetId) => void sendSelectionToPane(targetId, "cut")}
+              onCopyTo={(targetId) => void sendSelectionToPane(pane.id, targetId, "copy")}
+              onMoveTo={(targetId) => void sendSelectionToPane(pane.id, targetId, "cut")}
             />
           ))}
         </section>

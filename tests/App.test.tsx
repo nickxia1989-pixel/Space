@@ -368,6 +368,23 @@ describe("App", () => {
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
   });
 
+  it("copies from the pane that owns the transfer button even when another pane is active", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    const pane3 = await screen.findByLabelText("Pane 3");
+    await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Space Notes.md"));
+    await user.click(pane2);
+    await user.click(within(pane1).getAllByRole("button", { name: "P3" })[0]);
+
+    expect(await within(pane3).findByText("Space Notes.md")).toBeInTheDocument();
+    expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
+  });
+
   it("applies context menu file actions to the pane that opened the menu", async () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed Todo.txt");
