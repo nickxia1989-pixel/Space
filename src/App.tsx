@@ -1393,8 +1393,12 @@ export default function App() {
       if (event.shiftKey && pane.anchorPath) {
         const anchorIndex = entries.findIndex((item) => item.path === pane.anchorPath);
         const entryIndex = entries.findIndex((item) => item.path === entry.path);
-        const [start, end] = [anchorIndex, entryIndex].sort((a, b) => a - b);
-        selectedPaths = entries.slice(start, end + 1).map((item) => item.path);
+        if (anchorIndex >= 0 && entryIndex >= 0) {
+          const [start, end] = [anchorIndex, entryIndex].sort((a, b) => a - b);
+          selectedPaths = entries.slice(start, end + 1).map((item) => item.path);
+        } else {
+          selectedPaths = [entry.path];
+        }
       } else if (event.ctrlKey || event.metaKey) {
         selectedPaths = containsPath(pane.selectedPaths, entry.path)
           ? pane.selectedPaths.filter((item) => item.toLowerCase() !== entry.path.toLowerCase())

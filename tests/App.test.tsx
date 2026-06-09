@@ -494,6 +494,21 @@ describe("App", () => {
     expect(within(pane).getByText("Space Notes.md").closest("button")).toHaveClass("selected");
   });
 
+  it("falls back to single selection when shift-click anchor is filtered out", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Pictures")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Pictures"));
+    fireEvent.change(within(pane).getByPlaceholderText("Filter or search"), { target: { value: "D" } });
+
+    fireEvent.click(within(pane).getByText("Desktop"), { shiftKey: true });
+
+    await waitFor(() => expect(within(pane).getByText("1 selected, 0 B")).toBeInTheDocument());
+    expect(within(pane).getByText("Desktop").closest("button")).toHaveClass("selected");
+  });
+
   it("copies and moves files between panes through clipboard paste", async () => {
     const user = userEvent.setup();
     render(<App />);
