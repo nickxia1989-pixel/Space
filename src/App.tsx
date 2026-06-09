@@ -64,6 +64,7 @@ import type {
   OperationResult,
   QuickLaunchItem,
   QuickLaunchType,
+  BatchRenameHistoryEntry,
   BatchRenamePreset,
   BatchRenamePreview,
   BatchRenameRule,
@@ -157,6 +158,8 @@ const defaultBatchRenameRule: BatchRenameRule = {
   caseMode: "none",
   includeExtension: false
 };
+
+const maxBatchRenameHistory = 50;
 
 const defaultToolbarActionIds = [
   "newFolder",
@@ -327,6 +330,68 @@ function normalizeBatchRenamePresets(input: BatchRenamePreset[] | undefined): Ba
     });
 }
 
+function createBatchRenameHistoryEntry(
+  rule: BatchRenameRule,
+  preview: BatchRenamePreview,
+  message: string
+): BatchRenameHistoryEntry {
+  const now = Date.now();
+  const changedItems = preview.items.filter((item) => item.status === "ready");
+  return {
+    id: `rename-history-${now}-${Math.random().toString(16).slice(2, 8)}`,
+    performedAt: now,
+    itemCount: preview.items.length,
+    changedCount: changedItems.length,
+    message,
+    rule: cloneBatchRenameRule(rule),
+    items: changedItems.map((item) => ({
+      sourcePath: item.sourcePath,
+      targetPath: item.targetPath,
+      sourceName: item.sourceName,
+      targetName: item.targetName
+    }))
+  };
+}
+
+function normalizeBatchRenameHistory(input: BatchRenameHistoryEntry[] | undefined): BatchRenameHistoryEntry[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  return input
+    .filter((entry) => entry && typeof entry.id === "string" && !seen.has(entry.id))
+    .map((entry) => {
+      seen.add(entry.id);
+      const items = Array.isArray(entry.items)
+        ? entry.items
+            .filter(
+              (item) =>
+                item &&
+                typeof item.sourcePath === "string" &&
+                typeof item.targetPath === "string" &&
+                typeof item.sourceName === "string" &&
+                typeof item.targetName === "string"
+            )
+            .map((item) => ({
+              sourcePath: item.sourcePath,
+              targetPath: item.targetPath,
+              sourceName: item.sourceName,
+              targetName: item.targetName
+            }))
+        : [];
+      const changedCount = typeof entry.changedCount === "number" ? entry.changedCount : items.length;
+      return {
+        id: entry.id,
+        performedAt: typeof entry.performedAt === "number" ? entry.performedAt : Date.now(),
+        itemCount: typeof entry.itemCount === "number" ? entry.itemCount : Math.max(items.length, changedCount),
+        changedCount,
+        message: typeof entry.message === "string" ? entry.message : `Renamed ${changedCount} item(s).`,
+        rule: cloneBatchRenameRule(entry.rule),
+        items
+      };
+    })
+    .sort((a, b) => b.performedAt - a.performedAt)
+    .slice(0, maxBatchRenameHistory);
+}
+
 function normalizeActionIds(input: string[] | undefined, defaults: string[], catalog: ActionCatalogItem[]): string[] {
   const validIds = new Set(catalog.map((item) => item.id));
   if (!input) return defaults;
@@ -410,6 +475,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     colorRules: [],
     quickLaunchItems: [createQuickLaunchItem()],
     batchRenamePresets: [],
+    batchRenameHistory: [],
     toolbarActionIds: defaultToolbarActionIds,
     contextMenuActionIds: defaultContextMenuActionIds,
     savedAt: Date.now()
@@ -430,6 +496,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     colorRules: record.colorRules ?? [],
     quickLaunchItems: record.quickLaunchItems ?? [createQuickLaunchItem()],
     batchRenamePresets: normalizeBatchRenamePresets(record.batchRenamePresets),
+    batchRenameHistory: normalizeBatchRenameHistory(record.batchRenameHistory),
     toolbarActionIds: normalizeActionIds(record.toolbarActionIds, defaultToolbarActionIds, toolbarActionCatalog),
     contextMenuActionIds: normalizeActionIds(record.contextMenuActionIds, defaultContextMenuActionIds, contextMenuActionCatalog),
     savedAt: record.savedAt ?? Date.now()
@@ -503,6 +570,7 @@ export default function App() {
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [quickLaunchItems, setQuickLaunchItems] = useState<QuickLaunchItem[]>([]);
   const [batchRenamePresets, setBatchRenamePresets] = useState<BatchRenamePreset[]>([]);
+  const [batchRenameHistory, setBatchRenameHistory] = useState<BatchRenameHistoryEntry[]>([]);
   const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
   const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
@@ -551,6 +619,7 @@ export default function App() {
         setColorRules(workspace.colorRules ?? []);
         setQuickLaunchItems(workspace.quickLaunchItems ?? []);
         setBatchRenamePresets(workspace.batchRenamePresets ?? []);
+        setBatchRenameHistory(workspace.batchRenameHistory ?? []);
         setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
         setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
         setPanes(hydrated);
@@ -606,6 +675,7 @@ export default function App() {
         colorRules,
         quickLaunchItems,
         batchRenamePresets,
+        batchRenameHistory,
         toolbarActionIds,
         contextMenuActionIds,
         savedAt: Date.now()
@@ -614,7 +684,7 @@ export default function App() {
       if (workspaceDocument) void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, batchRenameHistory, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -650,6 +720,7 @@ export default function App() {
       colorRules,
       quickLaunchItems,
       batchRenamePresets,
+      batchRenameHistory,
       toolbarActionIds,
       contextMenuActionIds,
       savedAt: Date.now()
@@ -685,6 +756,16 @@ export default function App() {
     });
   }
 
+  function saveBatchRenameHistory(nextHistory: BatchRenameHistoryEntry[]): void {
+    const normalizedHistory = normalizeBatchRenameHistory(nextHistory);
+    setBatchRenameHistory(normalizedHistory);
+    persistCurrentWorkspaceSnapshot({
+      ...getCurrentWorkspaceSnapshot(),
+      batchRenameHistory: normalizedHistory,
+      savedAt: Date.now()
+    });
+  }
+
   function saveCurrentWorkspaceToList(records = workspaces): WorkspaceRecord[] {
     if (!activeWorkspaceId || panes.length !== 4) return records;
     const snapshot = getCurrentWorkspaceSnapshot();
@@ -701,6 +782,7 @@ export default function App() {
     setColorRules(workspace.colorRules ?? []);
     setQuickLaunchItems(workspace.quickLaunchItems ?? []);
     setBatchRenamePresets(workspace.batchRenamePresets ?? []);
+    setBatchRenameHistory(workspace.batchRenameHistory ?? []);
     setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
     setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
     setPreviewPath(null);
@@ -1037,12 +1119,19 @@ export default function App() {
 
   async function applyBatchRename(rule: BatchRenameRule) {
     if (!activePane?.selectedPaths.length) return;
-    await perform(
-      "Batch rename",
-      () => api.applyBatchRename({ paths: activePane.selectedPaths, rule }),
-      [activePane.id]
-    );
-    setBatchRenameOpen(false);
+    const paneId = activePane.id;
+    const paths = [...activePane.selectedPaths];
+    try {
+      const preview = await api.previewBatchRename({ paths, rule });
+      const result = await api.applyBatchRename({ paths, rule });
+      const message = result.message ?? "Batch rename complete.";
+      saveBatchRenameHistory([createBatchRenameHistoryEntry(rule, preview, message), ...batchRenameHistory]);
+      showToast("success", message);
+      await refreshPane(paneId);
+      setBatchRenameOpen(false);
+    } catch (error) {
+      showToast("error", `Batch rename failed: ${getErrorMessage(error)}`);
+    }
   }
 
   async function applyFolderSync(request: {
@@ -1509,7 +1598,9 @@ export default function App() {
           api={api}
           paths={activePane.selectedPaths}
           presets={batchRenamePresets}
+          history={batchRenameHistory}
           onSavePresets={saveBatchRenamePresets}
+          onClearHistory={() => saveBatchRenameHistory([])}
           onClose={() => setBatchRenameOpen(false)}
           onApply={(rule) => void applyBatchRename(rule)}
         />
@@ -2974,14 +3065,18 @@ function BatchRenameModal({
   api,
   paths,
   presets,
+  history,
   onSavePresets,
+  onClearHistory,
   onClose,
   onApply
 }: {
   api: SpaceApi;
   paths: string[];
   presets: BatchRenamePreset[];
+  history: BatchRenameHistoryEntry[];
   onSavePresets: (presets: BatchRenamePreset[]) => void;
+  onClearHistory: () => void;
   onClose: () => void;
   onApply: (rule: BatchRenameRule) => void;
 }) {
@@ -3189,6 +3284,32 @@ function BatchRenameModal({
             </div>
           ))}
         </div>
+
+        <section className="rename-history" aria-label="Rename history">
+          <div className="rename-history-header">
+            <div>
+              <strong>Rename History</strong>
+              <span>{history.length} recorded operation(s)</span>
+            </div>
+            <button disabled={history.length === 0} onClick={onClearHistory}>
+              Clear History
+            </button>
+          </div>
+          {history.length === 0 && <p className="rename-history-empty">No batch rename operations recorded yet.</p>}
+          {history.slice(0, 8).map((entry) => (
+            <div key={entry.id} className="rename-history-row">
+              <div>
+                <strong>{formatDate(entry.performedAt)}</strong>
+                <span>{entry.message}</span>
+              </div>
+              <span>{entry.changedCount}/{entry.itemCount} changed</span>
+              <code>{entry.rule.pattern}</code>
+              <small title={entry.items[0] ? `${entry.items[0].sourceName} -> ${entry.items[0].targetName}` : undefined}>
+                {entry.items[0] ? `${entry.items[0].sourceName} -> ${entry.items[0].targetName}` : "No changed items"}
+              </small>
+            </div>
+          ))}
+        </section>
 
         <footer className="modal-footer">
           <button onClick={onClose}>Cancel</button>

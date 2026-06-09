@@ -137,6 +137,7 @@ export interface WorkspaceSnapshot {
   colorRules?: ColorRule[];
   quickLaunchItems?: QuickLaunchItem[];
   batchRenamePresets?: BatchRenamePreset[];
+  batchRenameHistory?: BatchRenameHistoryEntry[];
   toolbarActionIds?: string[];
   contextMenuActionIds?: string[];
   savedAt: number;
@@ -219,6 +220,23 @@ export interface BatchRenamePreset {
   rule: BatchRenameRule;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface BatchRenameHistoryItem {
+  sourcePath: string;
+  targetPath: string;
+  sourceName: string;
+  targetName: string;
+}
+
+export interface BatchRenameHistoryEntry {
+  id: string;
+  performedAt: number;
+  itemCount: number;
+  changedCount: number;
+  message: string;
+  rule: BatchRenameRule;
+  items: BatchRenameHistoryItem[];
 }
 
 export interface BatchRenameRequest {

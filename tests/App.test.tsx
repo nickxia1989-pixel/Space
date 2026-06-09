@@ -93,6 +93,36 @@ describe("App", () => {
     await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.batchRenamePresets).toHaveLength(0));
   });
 
+  it("records and clears batch rename history", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Batch rename"));
+
+    const dialog = screen.getByRole("dialog", { name: "Batch rename" });
+    fireEvent.change(within(dialog).getByLabelText("Format"), { target: { value: "history-{n}" } });
+    await user.click(within(dialog).getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => {
+      const history = readSavedWorkspace()?.workspaces[0]?.batchRenameHistory;
+      expect(history).toHaveLength(1);
+      expect(history?.[0].rule.pattern).toBe("history-{n}");
+      expect(history?.[0].changedCount).toBe(1);
+    });
+
+    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Batch rename"));
+    const nextDialog = screen.getByRole("dialog", { name: "Batch rename" });
+    const historyRegion = within(nextDialog).getByRole("region", { name: "Rename history" });
+    expect(within(historyRegion).getByText("Renamed 1 item(s).")).toBeInTheDocument();
+
+    await user.click(within(historyRegion).getByRole("button", { name: "Clear History" }));
+    await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.batchRenameHistory).toHaveLength(0));
+    expect(within(historyRegion).getByText("No batch rename operations recorded yet.")).toBeInTheDocument();
+  });
+
   it("collects selected files in the stash shelf and hashes them", async () => {
     const user = userEvent.setup();
     render(<App />);
