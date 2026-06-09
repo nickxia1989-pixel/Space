@@ -5,6 +5,8 @@ import JSZip from "jszip";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzip } from "node:zlib";
+import { promisify } from "node:util";
 import type {
   ArchiveCreateRequest,
   ArchiveDirectoryPayload,
@@ -37,6 +39,7 @@ import type {
 } from "../src/shared.js";
 
 const fsp = fs.promises;
+const gunzipAsync = promisify(gunzip);
 const TEXT_EXTENSIONS = new Set([
   ".bat",
   ".cmd",
@@ -647,8 +650,13 @@ async function collectSyncFiles(rootPath: string, request: FolderSyncRequest): P
 
 export async function listArchive(request: ArchiveListRequest): Promise<ArchiveDirectoryPayload> {
   const archivePath = normalizeInputPath(request.archivePath);
+  if (isTarArchivePath(archivePath)) return listTarArchive(archivePath, request.internalPath);
+  return listZipArchive(archivePath, request.internalPath);
+}
+
+async function listZipArchive(archivePath: string, requestedInternalPath: string): Promise<ArchiveDirectoryPayload> {
   const zip = await loadZip(archivePath);
-  const internalPath = normalizeArchiveDirectory(request.internalPath);
+  const internalPath = normalizeArchiveDirectory(requestedInternalPath);
   const entryMap = new Map<string, ArchiveEntry>();
 
   for (const [rawPath, zipEntry] of Object.entries(zip.files)) {
@@ -692,7 +700,12 @@ export async function listArchive(request: ArchiveListRequest): Promise<ArchiveD
 
 export async function previewArchiveEntry(request: ArchivePreviewRequest): Promise<ArchivePreviewPayload> {
   const archivePath = normalizeInputPath(request.archivePath);
-  const internalPath = normalizeArchivePath(request.internalPath);
+  if (isTarArchivePath(archivePath)) return previewTarArchiveEntry(archivePath, request.internalPath);
+  return previewZipArchiveEntry(archivePath, request.internalPath);
+}
+
+async function previewZipArchiveEntry(archivePath: string, requestedInternalPath: string): Promise<ArchivePreviewPayload> {
+  const internalPath = normalizeArchivePath(requestedInternalPath);
   const name = path.posix.basename(internalPath.replace(/\/$/, ""));
   const zip = await loadZip(archivePath);
   const zipEntry = zip.file(internalPath);
@@ -746,8 +759,13 @@ export async function previewArchiveEntry(request: ArchivePreviewRequest): Promi
 export async function extractArchive(request: ArchiveExtractRequest): Promise<OperationResult> {
   const archivePath = normalizeInputPath(request.archivePath);
   const destinationPath = normalizeInputPath(request.destinationPath);
+  if (isTarArchivePath(archivePath)) return extractTarArchive(archivePath, destinationPath, request.internalPaths);
+  return extractZipArchive(archivePath, destinationPath, request.internalPaths);
+}
+
+async function extractZipArchive(archivePath: string, destinationPath: string, internalPaths: string[]): Promise<OperationResult> {
   const zip = await loadZip(archivePath);
-  const requestedPaths = request.internalPaths.map(normalizeArchivePath).filter(Boolean);
+  const requestedPaths = internalPaths.map(normalizeArchivePath).filter(Boolean);
   const selected = requestedPaths.length ? requestedPaths : [""];
   const affectedPaths: string[] = [];
 
@@ -764,6 +782,143 @@ export async function extractArchive(request: ArchiveExtractRequest): Promise<Op
     const data = await zipEntry.async("nodebuffer");
     await fsp.writeFile(targetPath, data);
     if (zipEntry.date) await fsp.utimes(targetPath, new Date(), zipEntry.date);
+    affectedPaths.push(targetPath);
+  }
+
+  return {
+    ok: true,
+    message: affectedPaths.length ? `Extracted ${affectedPaths.length} item(s).` : "No archive entries extracted.",
+    affectedPaths
+  };
+}
+
+interface TarArchiveEntry {
+  internalPath: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: number;
+  dataOffset: number;
+}
+
+interface TarArchive {
+  archivePath: string;
+  data: Buffer;
+  entries: TarArchiveEntry[];
+}
+
+async function listTarArchive(archivePath: string, requestedInternalPath: string): Promise<ArchiveDirectoryPayload> {
+  const archive = await loadTarArchive(archivePath);
+  const internalPath = normalizeArchiveDirectory(requestedInternalPath);
+  const entryMap = new Map<string, ArchiveEntry>();
+
+  for (const tarEntry of archive.entries) {
+    const normalizedPath = tarEntry.internalPath;
+    if (!normalizedPath.startsWith(internalPath)) continue;
+    const rest = normalizedPath.slice(internalPath.length);
+    if (!rest) continue;
+    const segment = rest.split("/")[0];
+    if (!segment) continue;
+    const childInternalPath = `${internalPath}${segment}${rest.includes("/") || tarEntry.isDirectory ? "/" : ""}`;
+    const existing = entryMap.get(childInternalPath);
+    if (existing) {
+      if (!existing.modifiedAt && tarEntry.modifiedAt) existing.modifiedAt = tarEntry.modifiedAt;
+      continue;
+    }
+    const isDirectory = childInternalPath.endsWith("/");
+    const extension = isDirectory ? "" : path.posix.extname(segment).toLowerCase();
+    entryMap.set(childInternalPath, {
+      name: segment,
+      archivePath,
+      internalPath: childInternalPath,
+      parentInternalPath: internalPath,
+      isDirectory,
+      size: isDirectory ? 0 : tarEntry.size,
+      modifiedAt: tarEntry.modifiedAt,
+      extension,
+      typeLabel: isDirectory ? "Folder" : extension ? `${extension.slice(1).toUpperCase()} File` : "File"
+    });
+  }
+
+  return {
+    archivePath,
+    internalPath,
+    entries: [...entryMap.values()].sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+    }),
+    scannedAt: Date.now()
+  };
+}
+
+async function previewTarArchiveEntry(archivePath: string, requestedInternalPath: string): Promise<ArchivePreviewPayload> {
+  const archive = await loadTarArchive(archivePath);
+  const internalPath = normalizeArchivePath(requestedInternalPath);
+  const name = path.posix.basename(internalPath.replace(/\/$/, ""));
+  const tarEntry = archive.entries.find((entry) => entry.internalPath === internalPath && !entry.isDirectory);
+  if (!tarEntry) {
+    const directoryExists = archive.entries.some((entry) =>
+      entry.internalPath.startsWith(normalizeArchiveDirectory(internalPath))
+    );
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: directoryExists ? "directory" : "missing",
+      size: 0,
+      modifiedAt: 0
+    };
+  }
+
+  const extension = path.posix.extname(name).toLowerCase();
+  const data = archive.data.subarray(tarEntry.dataOffset, tarEntry.dataOffset + tarEntry.size);
+  const imageMime = IMAGE_MIME_BY_EXTENSION[extension];
+  if (imageMime && tarEntry.size <= 8 * 1024 * 1024) {
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: "image",
+      size: tarEntry.size,
+      modifiedAt: tarEntry.modifiedAt,
+      dataUrl: `data:${imageMime};base64,${data.toString("base64")}`
+    };
+  }
+
+  if (TEXT_EXTENSIONS.has(extension) && tarEntry.size <= 1024 * 1024) {
+    const text = data.toString("utf8");
+    const truncated = text.length > 12000;
+    return {
+      archivePath,
+      internalPath,
+      name,
+      kind: "text",
+      size: tarEntry.size,
+      modifiedAt: tarEntry.modifiedAt,
+      text: truncated ? text.slice(0, 12000) : text,
+      truncated
+    };
+  }
+
+  return { archivePath, internalPath, name, kind: "binary", size: tarEntry.size, modifiedAt: tarEntry.modifiedAt };
+}
+
+async function extractTarArchive(archivePath: string, destinationPath: string, internalPaths: string[]): Promise<OperationResult> {
+  const archive = await loadTarArchive(archivePath);
+  const requestedPaths = internalPaths.map(normalizeArchivePath).filter(Boolean);
+  const selected = requestedPaths.length ? requestedPaths : [""];
+  const affectedPaths: string[] = [];
+
+  for (const tarEntry of archive.entries) {
+    if (tarEntry.isDirectory) continue;
+    const shouldExtract = selected.some((selectedPath) => {
+      const selectedDirectory = normalizeArchiveDirectory(selectedPath);
+      return !selectedPath || tarEntry.internalPath === selectedPath || tarEntry.internalPath.startsWith(selectedDirectory);
+    });
+    if (!shouldExtract) continue;
+    const targetPath = safeDestinationPath(destinationPath, tarEntry.internalPath);
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+    await fsp.writeFile(targetPath, archive.data.subarray(tarEntry.dataOffset, tarEntry.dataOffset + tarEntry.size));
+    if (tarEntry.modifiedAt) await fsp.utimes(targetPath, new Date(), new Date(tarEntry.modifiedAt));
     affectedPaths.push(targetPath);
   }
 
@@ -815,15 +970,131 @@ async function addDirectoryToZip(zip: JSZip, directoryPath: string, archiveRoot:
 
 async function loadZip(archivePath: string): Promise<JSZip> {
   if (path.extname(archivePath).toLowerCase() !== ".zip") {
-    throw new Error("Only ZIP archives are supported in this build.");
+    throw new Error("Only ZIP, TAR, and TGZ archives are supported in this build.");
   }
   const data = await fsp.readFile(archivePath);
   return JSZip.loadAsync(data);
 }
 
+async function loadTarArchive(archivePath: string): Promise<TarArchive> {
+  const compressed = await fsp.readFile(archivePath);
+  const data = isGzipTarArchivePath(archivePath) ? await gunzipAsync(compressed) : compressed;
+  return {
+    archivePath,
+    data,
+    entries: parseTarEntries(data)
+  };
+}
+
+function parseTarEntries(data: Buffer): TarArchiveEntry[] {
+  const entries: TarArchiveEntry[] = [];
+  let offset = 0;
+  let pendingLongName = "";
+  let pendingPaxPath = "";
+
+  while (offset + 512 <= data.length) {
+    const header = data.subarray(offset, offset + 512);
+    if (header.every((value) => value === 0)) break;
+    offset += 512;
+
+    const size = parseTarOctal(header, 124, 12);
+    const modifiedAt = parseTarOctal(header, 136, 12) * 1000;
+    const typeFlag = header[156] ? String.fromCharCode(header[156]) : "0";
+    const dataOffset = offset;
+    const dataEnd = offset + size;
+    if (dataEnd > data.length) throw new Error("Invalid TAR archive entry size.");
+
+    if (typeFlag === "L") {
+      pendingLongName = decodeTarString(data.subarray(dataOffset, dataEnd));
+      offset = alignTarOffset(dataEnd);
+      continue;
+    }
+
+    if (typeFlag === "x") {
+      pendingPaxPath = parsePaxHeaders(data.subarray(dataOffset, dataEnd)).path ?? pendingPaxPath;
+      offset = alignTarOffset(dataEnd);
+      continue;
+    }
+
+    if (typeFlag === "g") {
+      offset = alignTarOffset(dataEnd);
+      continue;
+    }
+
+    const name = pendingLongName || pendingPaxPath || buildTarEntryName(header);
+    pendingLongName = "";
+    pendingPaxPath = "";
+    const normalizedPath = normalizeArchivePath(name);
+    const isDirectory = typeFlag === "5" || normalizedPath.endsWith("/");
+    const supportedType = typeFlag === "0" || typeFlag === "\0" || typeFlag === "" || typeFlag === "5";
+    if (normalizedPath && supportedType) {
+      entries.push({
+        internalPath: isDirectory ? normalizeArchiveDirectory(normalizedPath) : normalizedPath,
+        isDirectory,
+        size: isDirectory ? 0 : size,
+        modifiedAt,
+        dataOffset
+      });
+    }
+
+    offset = alignTarOffset(dataEnd);
+  }
+
+  return entries;
+}
+
+function parsePaxHeaders(data: Buffer): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const text = data.toString("utf8");
+  let index = 0;
+  while (index < text.length) {
+    const spaceIndex = text.indexOf(" ", index);
+    if (spaceIndex < 0) break;
+    const lineLength = Number.parseInt(text.slice(index, spaceIndex), 10);
+    if (!Number.isFinite(lineLength) || lineLength <= 0) break;
+    const line = text.slice(spaceIndex + 1, index + lineLength).replace(/\n$/, "");
+    const equalsIndex = line.indexOf("=");
+    if (equalsIndex > 0) headers[line.slice(0, equalsIndex)] = line.slice(equalsIndex + 1);
+    index += lineLength;
+  }
+  return headers;
+}
+
+function buildTarEntryName(header: Buffer): string {
+  const name = decodeTarString(header.subarray(0, 100));
+  const prefix = decodeTarString(header.subarray(345, 500));
+  return prefix ? `${prefix}/${name}` : name;
+}
+
+function decodeTarString(value: Buffer): string {
+  const nullIndex = value.indexOf(0);
+  const trimmed = nullIndex >= 0 ? value.subarray(0, nullIndex) : value;
+  return trimmed.toString("utf8").replace(/\0/g, "").trimEnd();
+}
+
+function parseTarOctal(header: Buffer, start: number, length: number): number {
+  const raw = header.subarray(start, start + length).toString("ascii").replace(/\0/g, "").trim();
+  const parsed = Number.parseInt(raw || "0", 8);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function alignTarOffset(offset: number): number {
+  return Math.ceil(offset / 512) * 512;
+}
+
 function getZipEntrySize(entry: JSZip.JSZipObject): number {
   const unsafeEntry = entry as JSZip.JSZipObject & { _data?: { uncompressedSize?: number } };
   return unsafeEntry._data?.uncompressedSize ?? 0;
+}
+
+function isTarArchivePath(archivePath: string): boolean {
+  const lowerPath = archivePath.toLowerCase();
+  return lowerPath.endsWith(".tar") || lowerPath.endsWith(".tgz") || lowerPath.endsWith(".tar.gz");
+}
+
+function isGzipTarArchivePath(archivePath: string): boolean {
+  const lowerPath = archivePath.toLowerCase();
+  return lowerPath.endsWith(".tgz") || lowerPath.endsWith(".tar.gz");
 }
 
 function normalizeArchivePath(value: string): string {

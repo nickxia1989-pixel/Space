@@ -271,7 +271,7 @@ function createColorRule(label = "Archives"): ColorRule {
     backgroundColor: "#4b3714",
     nameMatch: "contains",
     namePattern: "",
-    extensions: "zip, 7z, rar",
+    extensions: "zip, tar, tgz, 7z, rar",
     sizeComparison: "any",
     sizeValueMB: 100,
     modifiedComparison: "any",
@@ -282,6 +282,11 @@ function createColorRule(label = "Archives"): ColorRule {
     createdUnit: "days",
     createdAt: Date.now()
   };
+}
+
+function isSupportedArchiveEntry(entry: FileEntry): boolean {
+  const name = entry.name.toLowerCase();
+  return name.endsWith(".zip") || name.endsWith(".tar") || name.endsWith(".tgz") || name.endsWith(".tar.gz");
 }
 
 function createQuickLaunchItem(label = "PowerShell Here"): QuickLaunchItem {
@@ -1085,7 +1090,7 @@ export default function App() {
     setPreviewPath(entry.path);
     if (entry.isDirectory) {
       void loadPane(paneId, entry.path);
-    } else if (entry.extension.toLowerCase() === ".zip") {
+    } else if (isSupportedArchiveEntry(entry)) {
       const pane = panes.find((item) => item.id === paneId);
       setArchiveBrowser({ archivePath: entry.path, destinationPath: pane?.path ?? entry.parentPath });
     } else {

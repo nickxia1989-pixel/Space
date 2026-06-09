@@ -21,7 +21,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Folder sync: compare two folders, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, save reusable workspace presets, and execute the sync.
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
 - Stash Shelf: collect files or folders from any pane, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
-- ZIP archive tools: double-click ZIP files to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
+- ZIP/TAR/TGZ archive tools: double-click supported archives to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
 - Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+R, Alt+Up, Delete, F2, and Enter.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
 
@@ -59,4 +59,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, media-dimension color rules, global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP, TAR, TGZ, and TAR.GZ archives are supported for browsing and extraction; other archive formats such as 7z/rar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, media-dimension color rules, global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.

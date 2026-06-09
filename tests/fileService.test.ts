@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   calculateHash,
@@ -324,6 +325,66 @@ describe("fileService", () => {
     ]);
     await expect(fs.readFile(path.join(extractTarget.path, "ArchiveSource", "docs", "guide.md"), "utf8")).resolves.toBe("# Guide");
   });
+
+  it("lists, previews, and extracts tar and tgz archives", async () => {
+    const tarBuffer = createTarArchive([
+      { name: "TarSource/", isDirectory: true },
+      { name: "TarSource/readme.txt", content: "tar preview text" },
+      { name: "TarSource/docs/", isDirectory: true },
+      { name: "TarSource/docs/guide.md", content: "# Tar Guide" }
+    ]);
+    const tarPath = path.join(tempRoot, "bundle.tar");
+    await fs.writeFile(tarPath, tarBuffer);
+
+    const root = await listArchive({ archivePath: tarPath, internalPath: "" });
+    expect(root.entries.map((entry) => entry.name)).toEqual(["TarSource"]);
+
+    const source = await listArchive({ archivePath: tarPath, internalPath: "TarSource/" });
+    expect(source.entries.map((entry) => entry.name).sort()).toEqual(["docs", "readme.txt"]);
+
+    const preview = await previewArchiveEntry({
+      archivePath: tarPath,
+      internalPath: "TarSource/readme.txt"
+    });
+    expect(preview.kind).toBe("text");
+    expect(preview.text).toContain("tar preview text");
+
+    const tgzPath = path.join(tempRoot, "bundle.tgz");
+    await fs.writeFile(tgzPath, gzipSync(tarBuffer));
+    const tgzPreview = await previewArchiveEntry({
+      archivePath: tgzPath,
+      internalPath: "TarSource/docs/guide.md"
+    });
+    expect(tgzPreview.kind).toBe("text");
+    expect(tgzPreview.text).toContain("# Tar Guide");
+
+    const extractTarget = await createFolder({ parentPath: tempRoot, name: "TarExtracted" });
+    const extracted = await extractArchive({
+      archivePath: tgzPath,
+      destinationPath: extractTarget.path,
+      internalPaths: ["TarSource/docs/"]
+    });
+    expect(extracted.affectedPaths?.map((targetPath) => path.relative(extractTarget.path, targetPath))).toEqual([
+      path.join("TarSource", "docs", "guide.md")
+    ]);
+    await expect(fs.readFile(path.join(extractTarget.path, "TarSource", "docs", "guide.md"), "utf8")).resolves.toBe(
+      "# Tar Guide"
+    );
+  });
+
+  it("blocks unsafe tar extraction paths", async () => {
+    const tarPath = path.join(tempRoot, "unsafe.tar");
+    await fs.writeFile(tarPath, createTarArchive([{ name: "../evil.txt", content: "nope" }]));
+
+    await expect(
+      extractArchive({
+        archivePath: tarPath,
+        destinationPath: tempRoot,
+        internalPaths: []
+      })
+    ).rejects.toThrow("escapes the destination folder");
+    await expect(fs.access(path.join(tempRoot, "..", "evil.txt"))).rejects.toThrow();
+  });
 });
 
 function previewRuleFromTest() {
@@ -341,4 +402,63 @@ function previewRuleFromTest() {
     caseMode: "none" as const,
     includeExtension: false
   };
+}
+
+interface TarTestEntry {
+  name: string;
+  content?: string;
+  isDirectory?: boolean;
+}
+
+function createTarArchive(entries: TarTestEntry[]): Buffer {
+  const blocks: Buffer[] = [];
+  const modifiedAt = Math.floor(new Date("2026-06-09T00:00:00Z").getTime() / 1000);
+
+  for (const entry of entries) {
+    const content = Buffer.from(entry.content ?? "", "utf8");
+    const isDirectory = entry.isDirectory ?? entry.name.endsWith("/");
+    blocks.push(createTarHeader(entry.name, isDirectory ? 0 : content.length, isDirectory ? "5" : "0", modifiedAt));
+    if (!isDirectory) {
+      blocks.push(content);
+      const padding = (512 - (content.length % 512)) % 512;
+      if (padding) blocks.push(Buffer.alloc(padding));
+    }
+  }
+
+  blocks.push(Buffer.alloc(512), Buffer.alloc(512));
+  return Buffer.concat(blocks);
+}
+
+function createTarHeader(name: string, size: number, typeFlag: "0" | "5", modifiedAt: number): Buffer {
+  const header = Buffer.alloc(512);
+  const nameBuffer = Buffer.from(name, "utf8");
+  if (nameBuffer.length > 100) throw new Error("Test TAR helper only supports names up to 100 bytes.");
+  nameBuffer.copy(header, 0);
+  writeTarOctal(header, 0o644, 100, 8);
+  writeTarOctal(header, 0, 108, 8);
+  writeTarOctal(header, 0, 116, 8);
+  writeTarOctal(header, size, 124, 12);
+  writeTarOctal(header, modifiedAt, 136, 12);
+  header.fill(0x20, 148, 156);
+  header.write(typeFlag, 156, 1, "ascii");
+  header.write("ustar", 257, 5, "ascii");
+  header.write("00", 263, 2, "ascii");
+
+  let checksum = 0;
+  for (const value of header) checksum += value;
+  writeTarChecksum(header, checksum);
+  return header;
+}
+
+function writeTarOctal(buffer: Buffer, value: number, offset: number, length: number): void {
+  const octal = value.toString(8).padStart(length - 1, "0");
+  buffer.write(octal.slice(-length + 1), offset, length - 1, "ascii");
+  buffer[offset + length - 1] = 0;
+}
+
+function writeTarChecksum(buffer: Buffer, value: number): void {
+  const octal = value.toString(8).padStart(6, "0");
+  buffer.write(octal, 148, 6, "ascii");
+  buffer[154] = 0;
+  buffer[155] = 0x20;
 }

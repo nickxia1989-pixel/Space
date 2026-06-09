@@ -177,12 +177,12 @@ describe("App", () => {
     expect(within(shelf).queryByText("Space Notes.md")).not.toBeInTheDocument();
   });
 
-  it("opens zip archives in the archive browser", async () => {
+  it("opens tar archives in the archive browser", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
-    await user.dblClick(screen.getByText("Archive.zip"));
+    await waitFor(() => expect(screen.getByText("Archive.tar")).toBeInTheDocument());
+    await user.dblClick(screen.getByText("Archive.tar"));
     expect(screen.getByRole("dialog", { name: "Archive browser" })).toBeInTheDocument();
     expect(screen.getByText("readme.txt")).toBeInTheDocument();
   });

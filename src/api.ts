@@ -139,6 +139,7 @@ function seedMockEntries(): void {
   ]);
   mockEntries.set(`${mockHome}\\Downloads`, [
     createMockEntry(`${mockHome}\\Downloads`, "Archive.zip", false, 9200000),
+    createMockEntry(`${mockHome}\\Downloads`, "Archive.tar", false, 7200000),
     createMockEntry(`${mockHome}\\Downloads`, "Installers", true)
   ]);
   mockEntries.set(`${mockHome}\\Pictures`, [
