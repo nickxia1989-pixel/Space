@@ -14,6 +14,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Workspace persistence: pane paths, histories, layout, active pane, and bookmarks are restored between launches.
 - New File Templates: create files from built-in or workspace-saved templates, edit template content, and use `$date(...)` variables in names or content.
 - Color Rules: per-workspace rules highlight matching files/folders by type, name operator, extension, size, modified age, and created age with custom text/background colors.
+- Quick Launch: per-workspace launch items run apps, command lines, or shortcuts from the active pane with variables for current path and selected files.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
 - Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, and apply.
 - Folder sync: compare two panes, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, and execute the sync.
@@ -57,4 +58,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, saved batch rename presets, scheduled/automatic folder sync presets, media-dimension color rules, and fully customizable toolbars/context menus are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP archives are supported; other archive formats such as 7z/rar/tar, encrypted archives, FTP/SFTP/cloud drives, saved batch rename presets, scheduled/automatic folder sync presets, media-dimension color rules, global hotkeys, and fully customizable toolbars/context menus are not implemented yet.

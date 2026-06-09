@@ -31,6 +31,7 @@ import type {
   KnownLocation,
   OperationResult,
   PreviewPayload,
+  QuickLaunchRunRequest,
   RenameRequest,
   SearchOptions
 } from "../src/shared.js";
@@ -862,6 +863,176 @@ export async function openTerminal(directoryPath: string): Promise<OperationResu
   const child = spawn(command, args, { cwd, detached: true, stdio: "ignore", windowsHide: false });
   child.unref();
   return { ok: true, message: `Opened terminal in ${cwd}.`, affectedPaths: [cwd] };
+}
+
+export async function runQuickLaunch(request: QuickLaunchRunRequest): Promise<OperationResult> {
+  const cwd = normalizeInputPath(request.currentPath);
+  const item = request.item;
+  if (!item.enabled) throw new Error("Quick Launch item is disabled.");
+  if (!item.command.trim()) throw new Error("Quick Launch command is empty.");
+
+  const invocation = buildQuickLaunchInvocation(request);
+  const child = spawn(invocation.command, invocation.args, {
+    cwd,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+    shell: false
+  });
+  const spawnError = await waitForImmediateSpawnError(child);
+  if (spawnError) throw spawnError;
+  child.unref();
+  return {
+    ok: true,
+    message: `Launched ${item.label || item.command}.`,
+    affectedPaths: [cwd, ...request.selectedPaths]
+  };
+}
+
+export function buildQuickLaunchInvocation(request: QuickLaunchRunRequest): { command: string; args: string[] } {
+  const item = request.item;
+  const context = normalizeQuickLaunchContext(request);
+  const command = expandQuickLaunchVariables(item.command, context, "literal").trim();
+  const argumentText = expandQuickLaunchVariables(item.arguments, context, item.type === "command" ? "shell" : "literal");
+  const openFiles = expandQuickLaunchOpenFiles(item.openFiles, context);
+
+  if (item.type === "command") {
+    const commandLine = [command, argumentText, ...openFiles.map(quoteShellArg)].filter(Boolean).join(" ").trim();
+    if (!commandLine) throw new Error("Quick Launch command is empty.");
+    return process.platform === "win32"
+      ? { command: "cmd.exe", args: ["/d", "/s", "/c", commandLine] }
+      : { command: "sh", args: ["-lc", commandLine] };
+  }
+
+  if (item.type === "shortcut") {
+    if (process.platform === "win32") {
+      return {
+        command: "cmd.exe",
+        args: [
+          "/d",
+          "/s",
+          "/c",
+          ["start", "\"\"", quoteShellArg(command), argumentText, ...openFiles.map(quoteShellArg)].filter(Boolean).join(" ")
+        ]
+      };
+    }
+    const opener = process.platform === "darwin" ? "open" : "xdg-open";
+    return { command: "sh", args: ["-lc", [opener, quoteShellArg(command), argumentText, ...openFiles.map(quoteShellArg)].filter(Boolean).join(" ")] };
+  }
+
+  return {
+    command,
+    args: [...parseCommandLine(argumentText), ...openFiles]
+  };
+}
+
+type QuickLaunchExpandMode = "literal" | "shell";
+
+interface QuickLaunchContext {
+  currentPath: string;
+  selectedPaths: string[];
+  selectedFilePaths: string[];
+  selectedFolderPaths: string[];
+}
+
+function normalizeQuickLaunchContext(request: QuickLaunchRunRequest): QuickLaunchContext {
+  return {
+    currentPath: normalizeInputPath(request.currentPath),
+    selectedPaths: request.selectedPaths.map(normalizeInputPath),
+    selectedFilePaths: request.selectedFilePaths.map(normalizeInputPath),
+    selectedFolderPaths: request.selectedFolderPaths.map(normalizeInputPath)
+  };
+}
+
+export function expandQuickLaunchVariables(value: string, context: QuickLaunchContext, mode: QuickLaunchExpandMode = "literal"): string {
+  const selectedPaths = context.selectedPaths;
+  const firstSelected = selectedPaths[0] ?? context.currentPath;
+  const variables: Record<string, string | string[]> = {
+    currentPath: context.currentPath,
+    selectedPaths,
+    selectedFiles: context.selectedFilePaths,
+    selectedFolders: context.selectedFolderPaths,
+    firstSelected,
+    firstName: path.basename(firstSelected),
+    selectedNames: selectedPaths.map((itemPath) => path.basename(itemPath))
+  };
+  return value.replace(/\{([a-zA-Z]+)\}/g, (match, key: string) => {
+    const replacement = variables[key];
+    if (replacement == null) return match;
+    if (Array.isArray(replacement)) {
+      return mode === "shell" ? replacement.map(quoteShellArg).join(" ") : replacement.join(" ");
+    }
+    return mode === "shell" ? quoteShellArg(replacement) : replacement;
+  });
+}
+
+function expandQuickLaunchOpenFiles(value: string, context: QuickLaunchContext): string[] {
+  if (!value.trim()) return [];
+  const result: string[] = [];
+  const variables: Record<string, string[]> = {
+    selectedPaths: context.selectedPaths,
+    selectedFiles: context.selectedFilePaths,
+    selectedFolders: context.selectedFolderPaths
+  };
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const token = line.match(/^\{([a-zA-Z]+)\}$/);
+    if (token && variables[token[1]]) {
+      result.push(...variables[token[1]]);
+    } else {
+      result.push(expandQuickLaunchVariables(line, context, "literal"));
+    }
+  }
+  return result;
+}
+
+function waitForImmediateSpawnError(child: ReturnType<typeof spawn>): Promise<Error | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (error: Error | null) => {
+      if (settled) return;
+      settled = true;
+      child.removeListener("error", onError);
+      if (!error) child.on("error", () => undefined);
+      resolve(error);
+    };
+    const onError = (error: Error) => finish(error);
+    child.once("error", onError);
+    setTimeout(() => finish(null), 50);
+  });
+}
+
+function parseCommandLine(value: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | null = null;
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index];
+    if ((char === "\"" || char === "'") && quote === null) {
+      quote = char;
+      continue;
+    }
+    if (quote === char) {
+      quote = null;
+      continue;
+    }
+    if (/\s/.test(char) && quote === null) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) args.push(current);
+  return args;
+}
+
+function quoteShellArg(value: string): string {
+  if (process.platform === "win32") return `"${value.replace(/"/g, "\\\"")}"`;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 // Allows tests to create temp paths that match runtime normalization.

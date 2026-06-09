@@ -11,8 +11,10 @@ import {
   deleteItems,
   applyBatchRename,
   applyFolderSync,
+  buildQuickLaunchInvocation,
   createArchive,
   extractArchive,
+  expandQuickLaunchVariables,
   expandDateVariables,
   listDirectory,
   listArchive,
@@ -98,6 +100,53 @@ describe("fileService", () => {
 
     expect(path.basename(file.path)).toBe(`report-${year}.md`);
     await expect(fs.readFile(file.path, "utf8")).resolves.toBe(`# Report ${year}\n`);
+  });
+
+  it("expands Quick Launch variables and builds app invocations", async () => {
+    const selectedFile = path.join(tempRoot, "note.txt");
+    const selectedFolder = path.join(tempRoot, "Folder");
+    const context = {
+      currentPath: tempRoot,
+      selectedPaths: [selectedFile, selectedFolder],
+      selectedFilePaths: [selectedFile],
+      selectedFolderPaths: [selectedFolder]
+    };
+
+    expect(expandQuickLaunchVariables("{firstName} in {currentPath}", context)).toBe(`note.txt in ${tempRoot}`);
+
+    const invocation = buildQuickLaunchInvocation({
+      item: {
+        id: "ql-test",
+        label: "Editor",
+        enabled: true,
+        type: "app",
+        command: "code",
+        arguments: "--reuse-window \"{currentPath}\"",
+        openFiles: "{selectedFiles}",
+        icon: "code",
+        createdAt: 1
+      },
+      ...context
+    });
+
+    expect(invocation.command).toBe("code");
+    expect(invocation.args).toEqual(["--reuse-window", tempRoot, selectedFile]);
+
+    const commandInvocation = buildQuickLaunchInvocation({
+      item: {
+        id: "ql-terminal",
+        label: "Terminal",
+        enabled: true,
+        type: "command",
+        command: "powershell.exe",
+        arguments: "Set-Location {currentPath}",
+        openFiles: "",
+        icon: "terminal",
+        createdAt: 1
+      },
+      ...context
+    });
+    expect(commandInvocation.args.join(" ")).not.toContain("note.txt");
   });
 
   it("does not move an item when the destination is already its parent directory", async () => {

@@ -177,6 +177,71 @@ button {
   height: 30px;
 }
 
+.quick-launch-panel {
+  position: fixed;
+  top: 68px;
+  left: 318px;
+  right: 308px;
+  z-index: 18;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 86px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: #202634;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.34);
+}
+
+.quick-launch-summary {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.quick-launch-summary strong {
+  font-size: 12px;
+}
+
+.quick-launch-summary span,
+.quick-launch-empty {
+  min-width: 0;
+  color: #8f9db2;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-launch-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.quick-launch-actions button,
+.quick-launch-manage {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6edf8;
+  cursor: pointer;
+}
+
+.quick-launch-actions button:hover,
+.quick-launch-manage:hover {
+  background: rgba(158, 231, 215, 0.17);
+}
+
 .icon-button {
   display: grid;
   place-items: center;
@@ -987,12 +1052,14 @@ button:disabled {
   width: min(900px, 100%);
 }
 
-.color-rules-modal {
+.color-rules-modal,
+.quick-launch-modal {
   width: min(980px, 100%);
 }
 
 .new-file-body,
-.color-rules-body {
+.color-rules-body,
+.quick-launch-body {
   min-height: 0;
   display: grid;
   gap: 12px;
@@ -1008,8 +1075,13 @@ button:disabled {
   grid-template-columns: 250px minmax(0, 1fr);
 }
 
+.quick-launch-body {
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
 .template-list,
-.color-rule-list {
+.color-rule-list,
+.quick-launch-list {
   min-height: 0;
   overflow: auto;
   display: flex;
@@ -1018,7 +1090,8 @@ button:disabled {
 }
 
 .template-list button,
-.color-rule-list button {
+.color-rule-list button,
+.quick-launch-list button {
   min-height: 48px;
   display: grid;
   gap: 2px;
@@ -1026,20 +1099,23 @@ button:disabled {
   text-align: left;
 }
 
-.color-rule-list button {
+.color-rule-list button,
+.quick-launch-list button {
   grid-template-columns: 34px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
 }
 
-.color-rule-list .add-rule-button {
+.color-rule-list .add-rule-button,
+.quick-launch-list .add-rule-button {
   min-height: 34px;
   display: block;
   text-align: center;
 }
 
 .template-list button.active,
-.color-rule-list button.active {
+.color-rule-list button.active,
+.quick-launch-list button.active {
   color: #0d1218;
   border-color: transparent;
   background: #9ee7d7;
@@ -1048,14 +1124,17 @@ button:disabled {
 .template-list button span,
 .template-list button small,
 .color-rule-list button span,
-.color-rule-list button small {
+.color-rule-list button small,
+.quick-launch-list button span,
+.quick-launch-list button small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .template-list button small,
-.color-rule-list button small {
+.color-rule-list button small,
+.quick-launch-list button small {
   color: inherit;
   opacity: 0.72;
 }
@@ -1073,7 +1152,8 @@ button:disabled {
 }
 
 .template-editor,
-.color-rule-editor {
+.color-rule-editor,
+.quick-launch-editor {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1081,6 +1161,12 @@ button:disabled {
 }
 
 .color-rule-editor {
+  align-content: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: auto;
+}
+
+.quick-launch-editor {
   align-content: start;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: auto;
@@ -1096,11 +1182,23 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
-.template-editor textarea {
+.launch-command-label,
+.launch-arguments-label,
+.launch-files-label,
+.variable-token-list {
+  grid-column: 1 / -1;
+}
+
+.template-editor textarea,
+.quick-launch-editor textarea {
   min-height: 230px;
   resize: vertical;
   padding: 9px;
   outline: none;
+}
+
+.quick-launch-editor textarea {
+  min-height: 92px;
 }
 
 .template-editor input[readonly] {
@@ -1110,7 +1208,8 @@ button:disabled {
 .rename-form label,
 .sync-form label,
 .template-editor label,
-.color-rule-editor label {
+.color-rule-editor label,
+.quick-launch-editor label {
   min-width: 0;
   display: grid;
   gap: 5px;
@@ -1124,7 +1223,9 @@ button:disabled {
 .sync-form select,
 .template-editor input,
 .color-rule-editor input,
-.color-rule-editor select {
+.color-rule-editor select,
+.quick-launch-editor input,
+.quick-launch-editor select {
   min-width: 0;
   height: 30px;
   padding: 0 8px;
@@ -1138,14 +1239,18 @@ button:disabled {
 .template-editor input:focus,
 .template-editor textarea:focus,
 .color-rule-editor input:focus,
-.color-rule-editor select:focus {
+.color-rule-editor select:focus,
+.quick-launch-editor input:focus,
+.quick-launch-editor select:focus,
+.quick-launch-editor textarea:focus {
   border-color: rgba(158, 231, 215, 0.78);
 }
 
 .rename-form .check-row,
 .sync-form .check-row,
 .template-editor .check-row,
-.color-rule-editor .check-row {
+.color-rule-editor .check-row,
+.quick-launch-editor .check-row {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1153,12 +1258,27 @@ button:disabled {
   color: #c7d2e3;
 }
 
-.color-rule-editor .rule-enabled {
+.color-rule-editor .rule-enabled,
+.quick-launch-editor .launch-enabled {
   grid-column: 1 / -1;
 }
 
 .color-rule-editor input[type="color"] {
   padding: 3px;
+}
+
+.variable-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.variable-token-list code {
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(158, 231, 215, 0.12);
+  color: #b7f0e6;
+  font-size: 11px;
 }
 
 .check-row input {

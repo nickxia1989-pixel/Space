@@ -116,4 +116,21 @@ describe("App", () => {
     await user.click(screen.getAllByLabelText("Icon view")[2]);
     await waitFor(() => expect(screen.getByText("Archive.zip").closest("button")).toHaveClass("colorized"));
   });
+
+  it("runs Quick Launch items and opens the settings panel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Quick launch"));
+
+    const panel = screen.getByRole("region", { name: "Quick Launch" });
+    expect(within(panel).getByText("PowerShell Here")).toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: "PowerShell Here" }));
+    expect(await screen.findByText("Launched PowerShell Here.")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Quick launch"));
+    await user.click(within(screen.getByRole("region", { name: "Quick Launch" })).getByRole("button", { name: "Manage" }));
+    expect(screen.getByRole("dialog", { name: "Quick Launch settings" })).toBeInTheDocument();
+  });
 });

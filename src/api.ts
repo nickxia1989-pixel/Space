@@ -303,6 +303,9 @@ function createBrowserMockApi(): SpaceApi {
     async openTerminal(path: string) {
       return mockResult(`Opened terminal in ${path}.`, [path]);
     },
+    async runQuickLaunch(request) {
+      return mockResult(`Launched ${request.item.label}.`, [request.currentPath, ...request.selectedPaths]);
+    },
     async getWorkspace() {
       return mockWorkspace;
     },

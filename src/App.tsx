@@ -26,6 +26,7 @@ import {
   Pencil,
   Plus,
   RefreshCcw,
+  Rocket,
   Rows3,
   Scissors,
   Search,
@@ -60,6 +61,8 @@ import type {
   LayoutMode,
   NewFileTemplate,
   OperationResult,
+  QuickLaunchItem,
+  QuickLaunchType,
   BatchRenamePreview,
   BatchRenameRule,
   FolderSyncDirection,
@@ -128,6 +131,15 @@ const iconByName: Record<string, LucideIcon> = {
   music: Music,
   video: Video
 };
+const quickLaunchVariableTokens = [
+  "{currentPath}",
+  "{selectedPaths}",
+  "{selectedFiles}",
+  "{selectedFolders}",
+  "{firstSelected}",
+  "{firstName}",
+  "{selectedNames}"
+];
 
 const defaultFileTemplates: NewFileTemplate[] = [
   {
@@ -186,6 +198,20 @@ function createColorRule(label = "Archives"): ColorRule {
     createdComparison: "any",
     createdValue: 1,
     createdUnit: "days",
+    createdAt: Date.now()
+  };
+}
+
+function createQuickLaunchItem(label = "PowerShell Here"): QuickLaunchItem {
+  return {
+    id: `quick-launch-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    label,
+    enabled: true,
+    type: "command",
+    command: "powershell.exe",
+    arguments: "-NoExit -Command Set-Location -LiteralPath {currentPath}",
+    openFiles: "",
+    icon: "terminal",
     createdAt: Date.now()
   };
 }
@@ -258,6 +284,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     stashItems: [],
     fileTemplates: [],
     colorRules: [],
+    quickLaunchItems: [createQuickLaunchItem()],
     savedAt: Date.now()
   };
 }
@@ -274,6 +301,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     stashItems: record.stashItems ?? [],
     fileTemplates: record.fileTemplates ?? [],
     colorRules: record.colorRules ?? [],
+    quickLaunchItems: record.quickLaunchItems ?? [createQuickLaunchItem()],
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -343,6 +371,7 @@ export default function App() {
   const [stashItems, setStashItems] = useState<StashShelfItem[]>([]);
   const [fileTemplates, setFileTemplates] = useState<NewFileTemplate[]>([]);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
+  const [quickLaunchItems, setQuickLaunchItems] = useState<QuickLaunchItem[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -353,6 +382,8 @@ export default function App() {
   const [hashLine, setHashLine] = useState<string>("");
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [colorRulesOpen, setColorRulesOpen] = useState(false);
+  const [quickLaunchMenuOpen, setQuickLaunchMenuOpen] = useState(false);
+  const [quickLaunchEditorOpen, setQuickLaunchEditorOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
@@ -384,6 +415,7 @@ export default function App() {
         setStashItems(workspace.stashItems ?? []);
         setFileTemplates(workspace.fileTemplates ?? []);
         setColorRules(workspace.colorRules ?? []);
+        setQuickLaunchItems(workspace.quickLaunchItems ?? []);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -435,6 +467,7 @@ export default function App() {
         stashItems,
         fileTemplates,
         colorRules,
+        quickLaunchItems,
         savedAt: Date.now()
       };
       const workspaceDocument: WorkspaceDocument = {
@@ -447,7 +480,7 @@ export default function App() {
       void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, fileTemplates, initialized, layout, panes, stashItems, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, fileTemplates, initialized, layout, panes, quickLaunchItems, stashItems, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -481,6 +514,7 @@ export default function App() {
       stashItems,
       fileTemplates,
       colorRules,
+      quickLaunchItems,
       savedAt: Date.now()
     };
   }
@@ -499,10 +533,12 @@ export default function App() {
     setStashItems(workspace.stashItems ?? []);
     setFileTemplates(workspace.fileTemplates ?? []);
     setColorRules(workspace.colorRules ?? []);
+    setQuickLaunchItems(workspace.quickLaunchItems ?? []);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
     setContextMenu(null);
+    setQuickLaunchMenuOpen(false);
     const hydrated = workspace.panes.map(hydratePane);
     setPanes(hydrated);
 
@@ -882,6 +918,26 @@ export default function App() {
     );
   }
 
+  async function runQuickLaunchItem(item: QuickLaunchItem) {
+    if (!activePane) return;
+    const entryByPath = new Map(activePane.entries.map((entry) => [entry.path.toLowerCase(), entry]));
+    const selectedFilePaths = activePane.selectedPaths.filter((targetPath) => entryByPath.get(targetPath.toLowerCase())?.isFile);
+    const selectedFolderPaths = activePane.selectedPaths.filter((targetPath) => entryByPath.get(targetPath.toLowerCase())?.isDirectory);
+    try {
+      const result = await api.runQuickLaunch({
+        item,
+        currentPath: activePane.path,
+        selectedPaths: activePane.selectedPaths,
+        selectedFilePaths,
+        selectedFolderPaths
+      });
+      showToast("success", result.message);
+      setQuickLaunchMenuOpen(false);
+    } catch (error) {
+      showToast("error", `Quick Launch failed: ${getErrorMessage(error)}`);
+    }
+  }
+
   function addSelectionToShelf() {
     if (!activePane?.selectedPaths.length) return;
     const entryByPath = new Map(activePane.entries.map((entry) => [entry.path.toLowerCase(), entry]));
@@ -1060,6 +1116,7 @@ export default function App() {
           <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
           <IconButton title="Add selection to shelf" onClick={addSelectionToShelf} icon={Plus} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Color rules" onClick={() => setColorRulesOpen(true)} icon={Palette} active={colorRules.some((rule) => rule.enabled)} />
+          <IconButton title="Quick launch" onClick={() => setQuickLaunchMenuOpen((open) => !open)} icon={Rocket} active={quickLaunchMenuOpen} disabled={!activePane} />
           <span className="toolbar-divider" />
           <IconButton title="Refresh" onClick={() => void refreshPane()} icon={RefreshCcw} />
           <IconButton title="Open terminal" onClick={() => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), [])} icon={Terminal} />
@@ -1073,6 +1130,19 @@ export default function App() {
           <IconButton title="Focus active pane" onClick={() => setLayout("focus")} icon={PanelRight} active={layout === "focus"} />
         </div>
       </header>
+
+      {quickLaunchMenuOpen && activePane && (
+        <QuickLaunchPanel
+          items={quickLaunchItems}
+          currentPath={activePane.path}
+          selectedCount={activePane.selectedPaths.length}
+          onRun={(item) => void runQuickLaunchItem(item)}
+          onManage={() => {
+            setQuickLaunchMenuOpen(false);
+            setQuickLaunchEditorOpen(true);
+          }}
+        />
+      )}
 
       <WorkspaceTabs
         workspaces={workspaces}
@@ -1201,6 +1271,18 @@ export default function App() {
         />
       )}
 
+      {quickLaunchEditorOpen && (
+        <QuickLaunchModal
+          items={quickLaunchItems}
+          onClose={() => setQuickLaunchEditorOpen(false)}
+          onSave={(items) => {
+            setQuickLaunchItems(items);
+            setQuickLaunchEditorOpen(false);
+            showToast("success", "Quick Launch items saved.");
+          }}
+        />
+      )}
+
       {batchRenameOpen && activePane && (
         <BatchRenameModal
           api={api}
@@ -1232,6 +1314,180 @@ export default function App() {
 
       {toast && <div className={`toast toast-${toast.kind}`}>{toast.message}</div>}
     </main>
+  );
+}
+
+function QuickLaunchPanel({
+  items,
+  currentPath,
+  selectedCount,
+  onRun,
+  onManage
+}: {
+  items: QuickLaunchItem[];
+  currentPath: string;
+  selectedCount: number;
+  onRun: (item: QuickLaunchItem) => void;
+  onManage: () => void;
+}) {
+  const enabledItems = items.filter((item) => item.enabled);
+  return (
+    <section className="quick-launch-panel" aria-label="Quick Launch">
+      <div className="quick-launch-summary">
+        <strong>Quick Launch</strong>
+        <span title={currentPath}>{selectedCount ? `${selectedCount} selected` : pathName(currentPath)}</span>
+      </div>
+      <div className="quick-launch-actions">
+        {enabledItems.map((item) => (
+          <button key={item.id} onClick={() => onRun(item)} title={item.command}>
+            <Rocket size={15} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+        {enabledItems.length === 0 && <span className="quick-launch-empty">No enabled launch items.</span>}
+      </div>
+      <button className="quick-launch-manage" onClick={onManage}>
+        Manage
+      </button>
+    </section>
+  );
+}
+
+function QuickLaunchModal({
+  items,
+  onClose,
+  onSave
+}: {
+  items: QuickLaunchItem[];
+  onClose: () => void;
+  onSave: (items: QuickLaunchItem[]) => void;
+}) {
+  const [draftItems, setDraftItems] = useState<QuickLaunchItem[]>(items.map((item) => ({ ...item })));
+  const [selectedId, setSelectedId] = useState(items[0]?.id ?? "");
+  const selectedItem = draftItems.find((item) => item.id === selectedId) ?? draftItems[0] ?? null;
+
+  function addItem() {
+    const nextItem = createQuickLaunchItem(`Launch ${draftItems.length + 1}`);
+    setDraftItems((current) => [...current, nextItem]);
+    setSelectedId(nextItem.id);
+  }
+
+  function updateItem<K extends keyof QuickLaunchItem>(key: K, value: QuickLaunchItem[K]) {
+    if (!selectedItem) return;
+    setDraftItems((current) => current.map((item) => (item.id === selectedItem.id ? { ...item, [key]: value } : item)));
+  }
+
+  function deleteItem() {
+    if (!selectedItem) return;
+    const remaining = draftItems.filter((item) => item.id !== selectedItem.id);
+    setDraftItems(remaining);
+    setSelectedId(remaining[0]?.id ?? "");
+  }
+
+  function saveItems() {
+    onSave(
+      draftItems.map((item) => ({
+        ...item,
+        label: item.label.trim() || "Untitled launch",
+        command: item.command.trim(),
+        arguments: item.arguments.trim(),
+        openFiles: item.openFiles.trim()
+      }))
+    );
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal quick-launch-modal" role="dialog" aria-modal="true" aria-label="Quick Launch settings">
+        <header className="modal-header">
+          <div>
+            <h2>Quick Launch</h2>
+            <span>Run apps, commands, or shortcuts from the active pane.</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="quick-launch-body">
+          <div className="quick-launch-list" aria-label="Quick Launch items">
+            <button className="add-rule-button" onClick={addItem}>
+              Add Item
+            </button>
+            {draftItems.length === 0 && <p className="empty-note">No launch items configured.</p>}
+            {draftItems.map((item) => (
+              <button
+                key={item.id}
+                className={item.id === selectedItem?.id ? "active" : ""}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <Rocket size={16} />
+                <span>{item.label || "Untitled launch"}</span>
+                <small>{item.enabled ? item.type : "Disabled"}</small>
+              </button>
+            ))}
+          </div>
+
+          {selectedItem ? (
+            <div className="quick-launch-editor">
+              <label className="check-row launch-enabled">
+                <input
+                  type="checkbox"
+                  checked={selectedItem.enabled}
+                  onChange={(event) => updateItem("enabled", event.target.checked)}
+                />
+                Enabled
+              </label>
+              <label>
+                Name
+                <input value={selectedItem.label} onChange={(event) => updateItem("label", event.target.value)} />
+              </label>
+              <label>
+                Type
+                <select value={selectedItem.type} onChange={(event) => updateItem("type", event.target.value as QuickLaunchType)}>
+                  <option value="app">App</option>
+                  <option value="command">Command Line</option>
+                  <option value="shortcut">Shortcut</option>
+                </select>
+              </label>
+              <label>
+                Icon
+                <input value={selectedItem.icon} onChange={(event) => updateItem("icon", event.target.value)} />
+              </label>
+              <label className="launch-command-label">
+                Command
+                <input value={selectedItem.command} onChange={(event) => updateItem("command", event.target.value)} spellCheck={false} />
+              </label>
+              <label className="launch-arguments-label">
+                Arguments
+                <textarea value={selectedItem.arguments} onChange={(event) => updateItem("arguments", event.target.value)} spellCheck={false} />
+              </label>
+              <label className="launch-files-label">
+                Open files
+                <textarea value={selectedItem.openFiles} onChange={(event) => updateItem("openFiles", event.target.value)} spellCheck={false} />
+              </label>
+              <div className="variable-token-list" aria-label="Quick Launch variables">
+                {quickLaunchVariableTokens.map((token) => (
+                  <code key={token}>{token}</code>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="color-rule-empty">
+              <p className="empty-note">Add a launch item to run apps or commands.</p>
+            </div>
+          )}
+        </div>
+
+        <footer className="modal-footer">
+          <button disabled={!selectedItem} onClick={deleteItem}>
+            Delete Item
+          </button>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={saveItems}>
+            Save Items
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

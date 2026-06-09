@@ -21,6 +21,7 @@ import {
   previewFolderSync,
   previewPath,
   renameItem,
+  runQuickLaunch,
   searchFiles
 } from "./fileService.js";
 import { WorkspaceStore } from "./workspaceStore.js";
@@ -35,6 +36,7 @@ import type {
   FileOperationRequest,
   FolderSyncRequest,
   HashRequest,
+  QuickLaunchRunRequest,
   RenameRequest,
   SearchOptions,
   WorkspaceDocument
@@ -111,6 +113,7 @@ function registerIpc(): void {
     return { ok: true, message: "Revealed.", affectedPaths: [targetPath] };
   });
   ipcMain.handle("space:open-terminal", (_event, directoryPath: string) => openTerminal(directoryPath));
+  ipcMain.handle("space:run-quick-launch", (_event, request: QuickLaunchRunRequest) => runQuickLaunch(request));
   ipcMain.handle("space:get-workspace", () => workspaceStore.read());
   ipcMain.handle("space:save-workspace", (_event, snapshot: WorkspaceDocument) => workspaceStore.write(snapshot));
 }

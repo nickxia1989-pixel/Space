@@ -12,6 +12,7 @@ export type ColorRuleTarget = "all" | "files" | "folders";
 export type ColorRuleNameMatch = "contains" | "startsWith" | "endsWith" | "equals" | "regex";
 export type ColorRuleComparison = "any" | "greaterThan" | "lessThan";
 export type ColorRuleTimeUnit = "minutes" | "hours" | "days";
+export type QuickLaunchType = "app" | "command" | "shortcut";
 
 export interface FileEntry {
   name: string;
@@ -87,6 +88,18 @@ export interface ColorRule {
   createdAt: number;
 }
 
+export interface QuickLaunchItem {
+  id: string;
+  label: string;
+  enabled: boolean;
+  type: QuickLaunchType;
+  command: string;
+  arguments: string;
+  openFiles: string;
+  icon: string;
+  createdAt: number;
+}
+
 export interface BootstrapPayload {
   homePath: string;
   knownLocations: KnownLocation[];
@@ -122,6 +135,7 @@ export interface WorkspaceSnapshot {
   stashItems?: StashShelfItem[];
   fileTemplates?: NewFileTemplate[];
   colorRules?: ColorRule[];
+  quickLaunchItems?: QuickLaunchItem[];
   savedAt: number;
 }
 
@@ -293,6 +307,14 @@ export interface ArchiveCreateRequest {
   includeRootFolder: boolean;
 }
 
+export interface QuickLaunchRunRequest {
+  item: QuickLaunchItem;
+  currentPath: string;
+  selectedPaths: string[];
+  selectedFilePaths: string[];
+  selectedFolderPaths: string[];
+}
+
 export interface SpaceApi {
   bootstrap(): Promise<BootstrapPayload>;
   listDirectory(path: string): Promise<DirectoryPayload>;
@@ -316,6 +338,7 @@ export interface SpaceApi {
   openPath(path: string): Promise<OperationResult>;
   revealPath(path: string): Promise<OperationResult>;
   openTerminal(path: string): Promise<OperationResult>;
+  runQuickLaunch(request: QuickLaunchRunRequest): Promise<OperationResult>;
   getWorkspace(): Promise<WorkspaceDocument | null>;
   saveWorkspace(snapshot: WorkspaceDocument): Promise<OperationResult>;
 }

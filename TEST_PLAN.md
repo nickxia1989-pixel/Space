@@ -11,6 +11,7 @@
 | Local file operations | `tests/fileService.test.ts` temp-directory lifecycle |
 | New File Templates | `tests/fileService.test.ts` template content/date variables; `tests/App.test.tsx` template modal create flow |
 | Color Rules | `tests/App.test.tsx` rule creation and highlighted entry coverage; browser DOM style check |
+| Quick Launch | `tests/fileService.test.ts` variable/argument construction; `tests/App.test.tsx` panel run/settings coverage |
 | Cross-pane transfer commands | Renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
 | Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage |
@@ -55,9 +56,10 @@ Expected result: all commands exit with code `0`.
 14. Select files in multiple panes, add them to Stash Shelf, preview a shelf item, copy the shelf to the active pane, move another shelf batch to the active pane, remove one shelf item, clear the shelf, and calculate SHA-256 for staged files.
 15. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all.
 16. Open Color Rules, add a rule for `.zip` files, save it, and confirm matching entries are highlighted in details view and icon view without changing selection behavior.
-17. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, and saved color rules are restored.
-18. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
-19. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
+17. Open Quick Launch, run the default PowerShell item from a pane, add a custom command/app/shortcut item, use `{currentPath}` and `{selectedPaths}`, save, and confirm it appears in the Quick Launch panel.
+18. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, and saved Quick Launch items are restored.
+19. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
+20. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
 ## Browser Renderer Checks
 
@@ -74,6 +76,7 @@ Open `http://127.0.0.1:5188/` and verify:
 - Pane 1 can switch to icon view.
 - The New File panel can create a Markdown note from the built-in date template.
 - The Color Rules panel can add a `.zip` rule and immediately highlight `Archive.zip`.
+- The Quick Launch panel runs the default item through the browser mock and opens the settings panel.
 - Filtering `Space` in pane 1 reduces the mock result set.
 - Adding `Space Notes.md` to Stash Shelf shows it in the left sidebar and Hash reports a shelf SHA-256 line.
 - No console `error` or `warning` entries appear.
