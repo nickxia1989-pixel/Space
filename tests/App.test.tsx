@@ -509,6 +509,21 @@ describe("App", () => {
     expect(within(pane).getByText("Desktop").closest("button")).toHaveClass("selected");
   });
 
+  it("clears hidden selections when filtering a pane", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Pictures")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Pictures"));
+    expect(within(pane).getByText("1 selected, 0 B")).toBeInTheDocument();
+
+    fireEvent.change(within(pane).getByPlaceholderText("Filter or search"), { target: { value: "D" } });
+
+    await waitFor(() => expect(within(pane).getByText("No selection")).toBeInTheDocument());
+    expect(screen.getByLabelText("Delete")).toBeDisabled();
+  });
+
   it("copies and moves files between panes through clipboard paste", async () => {
     const user = userEvent.setup();
     render(<App />);

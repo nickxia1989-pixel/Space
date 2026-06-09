@@ -1051,6 +1051,22 @@ export default function App() {
     setPanes((current) => current.map((pane) => (pane.id === paneId ? updater(pane) : pane)));
   }
 
+  function updatePaneFilter(paneId: number, filter: string) {
+    updatePane(paneId, (pane) => {
+      const nextPane = { ...pane, filter };
+      const retained = retainExistingSelection(pane.selectedPaths, pane.anchorPath, visibleEntries(nextPane));
+      return { ...nextPane, ...retained };
+    });
+  }
+
+  function updatePaneRecursiveSearch(paneId: number, recursiveSearch: boolean) {
+    updatePane(paneId, (pane) => {
+      const nextPane = { ...pane, recursiveSearch };
+      const retained = retainExistingSelection(pane.selectedPaths, pane.anchorPath, visibleEntries(nextPane));
+      return { ...nextPane, ...retained };
+    });
+  }
+
   function getCurrentWorkspaceSnapshot(): WorkspaceSnapshot {
     return {
       layout,
@@ -2039,8 +2055,8 @@ export default function App() {
                 clearAddressSuggestions(pane.id);
                 void loadPane(pane.id, pane.addressDraft);
               }}
-              onFilterChange={(value) => updatePane(pane.id, (current) => ({ ...current, filter: value }))}
-              onRecursiveChange={(value) => updatePane(pane.id, (current) => ({ ...current, recursiveSearch: value }))}
+              onFilterChange={(value) => updatePaneFilter(pane.id, value)}
+              onRecursiveChange={(value) => updatePaneRecursiveSearch(pane.id, value)}
               onSearch={() => void runSearch(pane.id)}
               onSort={(sortKey) =>
                 updatePane(pane.id, (current) => ({
