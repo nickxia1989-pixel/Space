@@ -208,6 +208,33 @@ describe("App", () => {
     );
   });
 
+  it("copies and moves files between panes through clipboard paste", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    const pane3 = await screen.findByLabelText("Pane 3");
+    await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Copy"));
+    await user.click(pane2);
+    await user.click(screen.getByLabelText("Paste"));
+
+    expect(await within(pane2).findByText("Space Notes.md")).toBeInTheDocument();
+    expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
+
+    await user.click(within(pane2).getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Cut"));
+    await user.click(pane3);
+    await user.click(screen.getByLabelText("Paste"));
+
+    expect(await within(pane3).findByText("Space Notes.md")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane2).queryByText("Space Notes.md")).not.toBeInTheDocument());
+    expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
+  });
+
   it("saves and loads batch rename presets", async () => {
     const user = userEvent.setup();
     render(<App />);

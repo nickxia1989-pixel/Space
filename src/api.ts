@@ -43,6 +43,11 @@ const mockWorkspaceStorageKey = "space.mock.workspace";
 let mockWorkspace: WorkspaceDocument | null = null;
 const mockEntries = new Map<string, FileEntry[]>();
 
+export function __resetBrowserMockFileSystemForTests(): void {
+  mockWorkspace = null;
+  mockEntries.clear();
+}
+
 function getMockStorage(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -163,6 +168,95 @@ function mockResult(message: string, affectedPaths: string[] = []): OperationRes
   return { ok: true, message, affectedPaths };
 }
 
+function mockJoin(parent: string, name: string): string {
+  return `${parent.replace(/[\\/]+$/, "")}\\${name}`;
+}
+
+function mockPathEquals(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function mockIsSameOrChild(candidate: string, parent: string): boolean {
+  const normalizedCandidate = candidate.replace(/[\\/]+$/, "").toLowerCase();
+  const normalizedParent = parent.replace(/[\\/]+$/, "").toLowerCase();
+  return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}\\`);
+}
+
+function findMockEntry(sourcePath: string): FileEntry | null {
+  const parent = parentPath(sourcePath);
+  return (mockEntries.get(parent) ?? []).find((entry) => mockPathEquals(entry.path, sourcePath)) ?? null;
+}
+
+function mockPathExists(targetPath: string): boolean {
+  return !!findMockEntry(targetPath) || mockEntries.has(targetPath);
+}
+
+function addMockEntry(parent: string, entry: FileEntry): void {
+  const siblings = mockEntries.get(parent) ?? [];
+  mockEntries.set(parent, [...siblings.filter((item) => !mockPathEquals(item.path, entry.path)), entry]);
+}
+
+function removeMockEntry(sourcePath: string): FileEntry {
+  const parent = parentPath(sourcePath);
+  const siblings = mockEntries.get(parent) ?? [];
+  const entry = siblings.find((item) => mockPathEquals(item.path, sourcePath));
+  if (!entry) throw new Error("Item not found.");
+  mockEntries.set(parent, siblings.filter((item) => !mockPathEquals(item.path, sourcePath)));
+  return entry;
+}
+
+function mockUniqueTargetPath(targetPath: string): string {
+  if (!mockPathExists(targetPath)) return targetPath;
+  const parent = parentPath(targetPath);
+  const name = pathName(targetPath);
+  const extensionIndex = name.lastIndexOf(".");
+  const hasExtension = extensionIndex > 0;
+  const baseName = hasExtension ? name.slice(0, extensionIndex) : name;
+  const extension = hasExtension ? name.slice(extensionIndex) : "";
+  for (let index = 1; index < 10000; index += 1) {
+    const suffix = index === 1 ? " copy" : ` copy ${index}`;
+    const candidate = mockJoin(parent, `${baseName}${suffix}${extension}`);
+    if (!mockPathExists(candidate)) return candidate;
+  }
+  throw new Error("Could not find a unique target name.");
+}
+
+function cloneMockEntryTree(entry: FileEntry, targetPath: string): FileEntry {
+  const cloned: FileEntry = {
+    ...entry,
+    name: pathName(targetPath),
+    path: targetPath,
+    parentPath: parentPath(targetPath),
+    createdAt: Date.now(),
+    modifiedAt: Date.now()
+  };
+  if (entry.isDirectory) {
+    const clonedChildren = (mockEntries.get(entry.path) ?? []).map((child) =>
+      cloneMockEntryTree(child, mockJoin(targetPath, child.name))
+    );
+    mockEntries.set(targetPath, clonedChildren);
+  }
+  return cloned;
+}
+
+function moveMockEntryTree(entry: FileEntry, targetPath: string): FileEntry {
+  const moved: FileEntry = {
+    ...entry,
+    name: pathName(targetPath),
+    path: targetPath,
+    parentPath: parentPath(targetPath),
+    modifiedAt: Date.now()
+  };
+  if (entry.isDirectory) {
+    const movedChildren = (mockEntries.get(entry.path) ?? []).map((child) =>
+      moveMockEntryTree(child, mockJoin(targetPath, child.name))
+    );
+    mockEntries.delete(entry.path);
+    mockEntries.set(targetPath, movedChildren);
+  }
+  return moved;
+}
+
 function getMockPathSuggestionParts(input: string): { parent: string; prefix: string } | null {
   const value = input.trim().replace(/^"|"$/g, "");
   if (!value) return null;
@@ -239,11 +333,31 @@ function createBrowserMockApi(): SpaceApi {
       return mockResult(`Deleted ${request.paths.length} item(s).`, request.paths);
     },
     async copyItems(request: FileOperationRequest) {
-      const copied = request.sources.map((source) => `${request.destination}\\${pathName(source)}`);
+      const copied = request.sources.map((source) => {
+        const sourceEntry = findMockEntry(source);
+        if (!sourceEntry) throw new Error("Item not found.");
+        const targetPath = mockUniqueTargetPath(mockJoin(request.destination, sourceEntry.name));
+        const cloned = cloneMockEntryTree(sourceEntry, targetPath);
+        addMockEntry(request.destination, cloned);
+        return targetPath;
+      });
       return mockResult(`Copied ${copied.length} item(s).`, copied);
     },
     async moveItems(request: FileOperationRequest) {
-      const moved = request.sources.map((source) => `${request.destination}\\${pathName(source)}`);
+      const moved: string[] = [];
+      for (const source of request.sources) {
+        const sourceEntry = findMockEntry(source);
+        if (!sourceEntry) throw new Error("Item not found.");
+        if (mockPathEquals(sourceEntry.parentPath, request.destination)) continue;
+        if (sourceEntry.isDirectory && mockIsSameOrChild(request.destination, sourceEntry.path)) {
+          throw new Error("Cannot move a folder into itself.");
+        }
+        const removed = removeMockEntry(sourceEntry.path);
+        const targetPath = mockUniqueTargetPath(mockJoin(request.destination, removed.name));
+        const movedEntry = moveMockEntryTree(removed, targetPath);
+        addMockEntry(request.destination, movedEntry);
+        moved.push(targetPath);
+      }
       return mockResult(`Moved ${moved.length} item(s).`, moved);
     },
     async preview(path: string): Promise<PreviewPayload> {
