@@ -522,6 +522,27 @@ describe("App", () => {
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
   });
 
+  it("refreshes every matching source and target folder after pane transfer moves", async () => {
+    const user = userEvent.setup();
+    const homePath = "C:\\Users\\Traveler";
+    const downloadsPath = `${homePath}\\Downloads`;
+    writeWorkspaceWithPanePaths([homePath, homePath, downloadsPath, `${homePath}\\Documents`]);
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    const pane3 = await screen.findByLabelText("Pane 3");
+    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane2).getByText("Desktop")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane3).getByText("Archive.zip")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Desktop"));
+    await user.click(within(pane1).getAllByRole("button", { name: "P3" })[1]);
+
+    expect(await within(pane3).findByText("Desktop")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane2).queryByText("Desktop")).not.toBeInTheDocument());
+  });
+
   it("applies context menu file actions to the pane that opened the menu", async () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed Todo.txt");

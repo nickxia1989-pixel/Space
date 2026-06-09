@@ -1470,6 +1470,7 @@ export default function App() {
     if (!targetPane) return;
     const sources = [...sourcePane.selectedPaths];
     const destination = targetPane.path;
+    const refreshIds = operationRefreshIds([sourcePane.id, targetPaneId], [destination, ...sources.map(parentPath)]);
     setActivePaneId(sourcePane.id);
     const result = await perform(
       mode === "copy" ? "Copy to pane" : "Move to pane",
@@ -1477,7 +1478,7 @@ export default function App() {
         mode === "copy"
           ? api.copyItems({ sources, destination })
           : api.moveItems({ sources, destination }),
-      [sourcePane.id, targetPaneId]
+      refreshIds
     );
     if (result && mode === "cut") await recoverMovedPanes(sources, destination, result);
   }
