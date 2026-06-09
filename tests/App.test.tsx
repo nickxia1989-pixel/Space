@@ -92,6 +92,23 @@ describe("App", () => {
     expect(screen.getAllByLabelText("Icon view")[0]).toHaveClass("active");
   });
 
+  it("suggests matching paths in the address bar", async () => {
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    const addressInput = within(pane).getByDisplayValue("C:\\Users\\Traveler");
+    fireEvent.change(addressInput, { target: { value: "C:\\Users\\Traveler\\D" } });
+
+    await waitFor(() => {
+      const values = [...pane.querySelectorAll("datalist option")].map((option) => option.getAttribute("value"));
+      expect(values).toEqual([
+        "C:\\Users\\Traveler\\Desktop",
+        "C:\\Users\\Traveler\\Documents",
+        "C:\\Users\\Traveler\\Downloads"
+      ]);
+    });
+  });
+
   it("creates files from the new file template panel", async () => {
     const user = userEvent.setup();
     const today = new Date().toISOString().slice(0, 10);

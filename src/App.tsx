@@ -65,6 +65,7 @@ import type {
   LayoutMode,
   NewFileTemplate,
   OperationResult,
+  PathSuggestion,
   QuickLaunchItem,
   QuickLaunchType,
   BatchRenameHistoryEntry,
@@ -698,6 +699,7 @@ export default function App() {
   const [folderSyncPresets, setFolderSyncPresets] = useState<FolderSyncPreset[]>([]);
   const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
   const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
+  const [addressSuggestions, setAddressSuggestions] = useState<Record<number, PathSuggestion[]>>({});
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -717,6 +719,7 @@ export default function App() {
   const [hashCompareOpen, setHashCompareOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
   const toastCounter = useRef(0);
+  const addressSuggestionCounters = useRef<Record<number, number>>({});
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
@@ -1009,6 +1012,7 @@ export default function App() {
 
   async function loadPane(paneId: number, targetPath: string, mode: "push" | "replace" = "push") {
     setActivePaneId(paneId);
+    clearAddressSuggestions(paneId);
     updatePane(paneId, (pane) => ({ ...pane, loading: true, error: undefined, addressDraft: targetPath }));
     try {
       const payload = await api.listDirectory(targetPath);
@@ -1086,6 +1090,7 @@ export default function App() {
     const nextPath = pane.history[nextIndex];
     if (!nextPath) return;
     setActivePaneId(paneId);
+    clearAddressSuggestions(paneId);
     updatePane(paneId, (current) => ({ ...current, loading: true, error: undefined, addressDraft: nextPath }));
     api
       .listDirectory(nextPath)
@@ -1121,6 +1126,32 @@ export default function App() {
       await Promise.all([...new Set(refreshIds)].map((id) => refreshPane(id)));
     } catch (error) {
       showToast("error", `${label} failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  function clearAddressSuggestions(paneId: number) {
+    setAddressSuggestions((current) => {
+      if (!current[paneId]?.length) return current;
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
+  }
+
+  async function updateAddressDraft(paneId: number, value: string) {
+    updatePane(paneId, (pane) => ({ ...pane, addressDraft: value }));
+    const requestId = (addressSuggestionCounters.current[paneId] ?? 0) + 1;
+    addressSuggestionCounters.current[paneId] = requestId;
+    if (value.trim().length < 2) {
+      clearAddressSuggestions(paneId);
+      return;
+    }
+    try {
+      const suggestions = await api.suggestPaths({ input: value, limit: 8 });
+      if (addressSuggestionCounters.current[paneId] !== requestId) return;
+      setAddressSuggestions((current) => ({ ...current, [paneId]: suggestions }));
+    } catch {
+      if (addressSuggestionCounters.current[paneId] === requestId) clearAddressSuggestions(paneId);
     }
   }
 
@@ -1679,6 +1710,7 @@ export default function App() {
               pane={pane}
               entries={visibleEntries(pane)}
               colorRules={colorRules}
+              addressSuggestions={addressSuggestions[pane.id] ?? []}
               active={pane.id === activePaneId}
               onActivate={() => setActivePaneId(pane.id)}
               onNavigate={(targetPath) => void loadPane(pane.id, targetPath)}
@@ -1686,8 +1718,11 @@ export default function App() {
               onForward={() => goHistory(pane.id, 1)}
               onUp={() => void loadPane(pane.id, parentPath(pane.path))}
               onRefresh={() => void refreshPane(pane.id)}
-              onAddressChange={(value) => updatePane(pane.id, (current) => ({ ...current, addressDraft: value }))}
-              onAddressSubmit={() => void loadPane(pane.id, pane.addressDraft)}
+              onAddressChange={(value) => void updateAddressDraft(pane.id, value)}
+              onAddressSubmit={() => {
+                clearAddressSuggestions(pane.id);
+                void loadPane(pane.id, pane.addressDraft);
+              }}
               onFilterChange={(value) => updatePane(pane.id, (current) => ({ ...current, filter: value }))}
               onRecursiveChange={(value) => updatePane(pane.id, (current) => ({ ...current, recursiveSearch: value }))}
               onSearch={() => void runSearch(pane.id)}
@@ -2233,6 +2268,7 @@ function ExplorerPane({
   pane,
   entries,
   colorRules,
+  addressSuggestions,
   active,
   onActivate,
   onNavigate,
@@ -2258,6 +2294,7 @@ function ExplorerPane({
   pane: PaneState;
   entries: FileEntry[];
   colorRules: ColorRule[];
+  addressSuggestions: PathSuggestion[];
   active: boolean;
   onActivate: () => void;
   onNavigate: (path: string) => void;
@@ -2328,7 +2365,19 @@ function ExplorerPane({
           onAddressSubmit();
         }}
       >
-        <input value={pane.addressDraft} onChange={(event) => onAddressChange(event.target.value)} spellCheck={false} />
+        <input
+          value={pane.addressDraft}
+          list={`path-suggestions-${pane.id}`}
+          onChange={(event) => onAddressChange(event.target.value)}
+          spellCheck={false}
+        />
+        <datalist id={`path-suggestions-${pane.id}`}>
+          {addressSuggestions.map((suggestion) => (
+            <option key={suggestion.path} value={suggestion.path}>
+              {suggestion.isDirectory ? "Folder" : "File"} - {suggestion.label}
+            </option>
+          ))}
+        </datalist>
         <button type="submit">Go</button>
       </form>
 

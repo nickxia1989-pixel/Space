@@ -22,7 +22,8 @@ import {
   previewPath,
   renameItem,
   runQuickLaunch,
-  searchFiles
+  searchFiles,
+  suggestPaths
 } from "./fileService.js";
 import { WorkspaceStore } from "./workspaceStore.js";
 import type {
@@ -36,6 +37,7 @@ import type {
   FileOperationRequest,
   FolderSyncRequest,
   HashRequest,
+  PathSuggestionRequest,
   QuickLaunchRunRequest,
   RenameRequest,
   SearchOptions,
@@ -86,6 +88,7 @@ function registerIpc(): void {
   ipcMain.handle("space:bootstrap", () => getBootstrap());
   ipcMain.handle("space:list-directory", (_event, directoryPath: string) => listDirectory(directoryPath));
   ipcMain.handle("space:search-files", (_event, options: SearchOptions) => searchFiles(options));
+  ipcMain.handle("space:suggest-paths", (_event, request: PathSuggestionRequest) => suggestPaths(request));
   ipcMain.handle("space:create-folder", (_event, request: CreateItemRequest) => createFolder(request));
   ipcMain.handle("space:create-file", (_event, request: CreateItemRequest) => createFile(request));
   ipcMain.handle("space:rename-item", (_event, request: RenameRequest) => renameItem(request));

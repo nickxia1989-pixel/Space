@@ -5,7 +5,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 ## Current Feature Set
 
 - Four integrated explorer panes with a modern compact desktop layout.
-- Per-pane navigation: back, forward, up, refresh, breadcrumb navigation, and editable address bar.
+- Per-pane navigation: back, forward, up, refresh, breadcrumb navigation, and editable address bar with path suggestions.
 - Per-pane details/icon views, sortable details columns, multi-select, status bar, and active-pane highlighting.
 - Quick Access sidebar for common Windows user folders, drive list, and user bookmarks.
 - File operations through Electron IPC: create folder, create templated file, rename, delete to trash, copy, move, open, reveal in Explorer, and open terminal.

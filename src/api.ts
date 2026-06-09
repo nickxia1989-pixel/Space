@@ -19,6 +19,8 @@ import type {
   HashRequest,
   KnownLocation,
   OperationResult,
+  PathSuggestion,
+  PathSuggestionRequest,
   PreviewPayload,
   RenameRequest,
   SearchOptions,
@@ -161,6 +163,30 @@ function mockResult(message: string, affectedPaths: string[] = []): OperationRes
   return { ok: true, message, affectedPaths };
 }
 
+function getMockPathSuggestionParts(input: string): { parent: string; prefix: string } | null {
+  const value = input.trim().replace(/^"|"$/g, "");
+  if (!value) return null;
+  if (/[\\/]$/.test(value)) {
+    return { parent: value.replace(/[\\/]+$/, ""), prefix: "" };
+  }
+  return { parent: parentPath(value), prefix: pathName(value).toLowerCase() };
+}
+
+function mockSuggestPaths(request: PathSuggestionRequest): PathSuggestion[] {
+  seedMockEntries();
+  const parts = getMockPathSuggestionParts(request.input);
+  if (!parts) return [];
+  const limit = Math.max(1, Math.min(request.limit || 8, 50));
+  return [...(mockEntries.get(parts.parent) ?? [])]
+    .filter((entry) => !parts.prefix || entry.name.toLowerCase().startsWith(parts.prefix))
+    .sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+    })
+    .slice(0, limit)
+    .map((entry) => ({ path: entry.path, label: entry.name, isDirectory: entry.isDirectory }));
+}
+
 function createBrowserMockApi(): SpaceApi {
   return {
     async bootstrap(): Promise<BootstrapPayload> {
@@ -178,6 +204,9 @@ function createBrowserMockApi(): SpaceApi {
       seedMockEntries();
       const query = options.query.toLowerCase();
       return [...mockEntries.values()].flat().filter((entry) => entry.name.toLowerCase().includes(query));
+    },
+    async suggestPaths(request: PathSuggestionRequest) {
+      return mockSuggestPaths(request);
     },
     async createFolder(request: CreateItemRequest) {
       const entry = createMockEntry(request.parentPath, request.name, true);

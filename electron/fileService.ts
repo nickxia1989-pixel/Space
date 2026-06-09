@@ -32,6 +32,8 @@ import type {
   HashRequest,
   KnownLocation,
   OperationResult,
+  PathSuggestion,
+  PathSuggestionRequest,
   PreviewPayload,
   QuickLaunchRunRequest,
   RenameRequest,
@@ -361,6 +363,47 @@ export async function searchFiles(options: SearchOptions): Promise<FileEntry[]> 
 
   await scan(rootPath);
   return sortEntries(results);
+}
+
+function parsePathSuggestionInput(input: string): { parentPath: string; prefix: string } | null {
+  const value = input.trim().replace(/^"|"$/g, "");
+  if (value.length < 2) return null;
+  if (/^[A-Za-z]:$/.test(value)) {
+    return { parentPath: `${value}\\`, prefix: "" };
+  }
+  if (/[\\/]$/.test(value)) {
+    return { parentPath: normalizeInputPath(value), prefix: "" };
+  }
+  const parentCandidate = path.dirname(value);
+  if (parentCandidate === "." && !path.isAbsolute(value)) return null;
+  return {
+    parentPath: normalizeInputPath(parentCandidate),
+    prefix: path.basename(value)
+  };
+}
+
+export async function suggestPaths(request: PathSuggestionRequest): Promise<PathSuggestion[]> {
+  const parsed = parsePathSuggestionInput(request.input);
+  if (!parsed) return [];
+  const limit = Math.max(1, Math.min(request.limit || 8, 50));
+  const prefix = parsed.prefix.toLowerCase();
+  try {
+    const dirents = await fsp.readdir(parsed.parentPath, { withFileTypes: true });
+    return dirents
+      .filter((dirent) => !prefix || dirent.name.toLowerCase().startsWith(prefix))
+      .sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+      })
+      .slice(0, limit)
+      .map((dirent) => ({
+        path: path.join(parsed.parentPath, dirent.name),
+        label: dirent.name,
+        isDirectory: dirent.isDirectory()
+      }));
+  } catch {
+    return [];
+  }
 }
 
 export async function previewPath(targetPath: string): Promise<PreviewPayload> {

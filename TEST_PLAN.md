@@ -7,7 +7,7 @@
 | Windows desktop app launches | `npm run smoke:electron` |
 | Four explorer panes render | `tests/App.test.tsx`; browser DOM verification |
 | Modern responsive layout | Browser screenshot at `http://127.0.0.1:5188/`; overflow checks |
-| Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot |
+| Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot; path suggestion tests |
 | Local file operations | `tests/fileService.test.ts` temp-directory lifecycle |
 | Selection and path utilities | `tests/App.test.tsx` copy-path and select-same-type coverage |
 | New File Templates | `tests/fileService.test.ts` template content/date variables; `tests/App.test.tsx` template modal create flow |
@@ -47,7 +47,7 @@ Expected result: all commands exit with code `0`.
 1. Run `npm start`.
 2. Confirm the app opens as a desktop window named `Space`.
 3. Confirm four panes are visible in the default grid layout.
-4. In pane 1, navigate into a folder by double-clicking, then use Back, Forward, Up, breadcrumb buttons, and the editable address bar.
+4. In pane 1, navigate into a folder by double-clicking, then use Back, Forward, Up, breadcrumb buttons, and the editable address bar; type a partial path and confirm matching path suggestions appear before submitting.
 5. Select an item, use Copy Paths and Ctrl+Shift+C, paste into a text target, and confirm full paths are copied one per line; use Select Same Type and confirm matching extensions or folders are selected in the current pane.
 6. Create a temporary folder and create a file from the New File template panel, including a `$date(...)` name, then rename and delete them.
 7. Select one or more files and copy/move them to another pane using the `Copy to P#` and `Move to P#` controls.
@@ -82,6 +82,7 @@ Open `http://127.0.0.1:5188/` and verify:
 - Exactly four panes render.
 - Layout switcher changes grid/columns/rows/focus modes.
 - Pane 1 can switch to icon view.
+- Typing `C:\Users\Traveler\D` in pane 1's address bar shows Desktop, Documents, and Downloads path suggestions.
 - The New File panel can create a Markdown note from the built-in date template.
 - The Color Rules panel can add a `.zip` rule and immediately highlight `Archive.zip`.
 - The Quick Launch panel runs the default item through the browser mock and opens the settings panel.

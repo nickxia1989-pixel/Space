@@ -25,7 +25,8 @@ import {
   previewFolderSync,
   previewPath,
   renameItem,
-  searchFiles
+  searchFiles,
+  suggestPaths
 } from "../electron/fileService";
 
 let tempRoot = "";
@@ -54,6 +55,10 @@ describe("fileService", () => {
 
     const found = await searchFiles({ rootPath: tempRoot, query: "notes", recursive: true, limit: 25 });
     expect(found.map((entry) => entry.path)).toContain(renamed.path);
+
+    const suggestions = await suggestPaths({ input: path.join(tempRoot, "Al"), limit: 5 });
+    expect(suggestions.map((suggestion) => suggestion.path)).toContain(folder.path);
+    expect(suggestions[0].isDirectory).toBe(true);
 
     const hash = await calculateHash({ path: renamed.path, algorithm: "sha256" });
     expect(hash.value).toBe("611c18c01d7c00df07569d689a719fec4a5ffdef4e465c7952e01d5b7ac42c36");

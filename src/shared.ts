@@ -169,6 +169,17 @@ export interface SearchOptions {
   limit: number;
 }
 
+export interface PathSuggestionRequest {
+  input: string;
+  limit: number;
+}
+
+export interface PathSuggestion {
+  path: string;
+  label: string;
+  isDirectory: boolean;
+}
+
 export interface FileOperationRequest {
   sources: string[];
   destination: string;
@@ -357,6 +368,7 @@ export interface SpaceApi {
   bootstrap(): Promise<BootstrapPayload>;
   listDirectory(path: string): Promise<DirectoryPayload>;
   searchFiles(options: SearchOptions): Promise<FileEntry[]>;
+  suggestPaths(request: PathSuggestionRequest): Promise<PathSuggestion[]>;
   createFolder(request: CreateItemRequest): Promise<FileEntry>;
   createFile(request: CreateItemRequest): Promise<FileEntry>;
   renameItem(request: RenameRequest): Promise<FileEntry>;
