@@ -100,4 +100,20 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "Design Copy" })).toBeInTheDocument());
     promptSpy.mockRestore();
   });
+
+  it("adds color rules and highlights matching entries", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Color rules"));
+
+    const dialog = screen.getByRole("dialog", { name: "Color rules" });
+    await user.click(within(dialog).getByRole("button", { name: "Add Rule" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save Rules" }));
+
+    await waitFor(() => expect(screen.getByText("Archive.zip").closest("button")).toHaveClass("colorized"));
+    await user.click(screen.getAllByLabelText("Icon view")[2]);
+    await waitFor(() => expect(screen.getByText("Archive.zip").closest("button")).toHaveClass("colorized"));
+  });
 });

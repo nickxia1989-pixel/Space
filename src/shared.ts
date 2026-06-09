@@ -8,6 +8,10 @@ export type RenameCaseMode = "none" | "lower" | "upper" | "title";
 export type FolderSyncDirection = "updateRight" | "updateLeft" | "updateBoth";
 export type FolderSyncActionType = "copyLeftToRight" | "copyRightToLeft";
 export type ArchivePreviewKind = "image" | "text" | "directory" | "binary" | "missing";
+export type ColorRuleTarget = "all" | "files" | "folders";
+export type ColorRuleNameMatch = "contains" | "startsWith" | "endsWith" | "equals" | "regex";
+export type ColorRuleComparison = "any" | "greaterThan" | "lessThan";
+export type ColorRuleTimeUnit = "minutes" | "hours" | "days";
 
 export interface FileEntry {
   name: string;
@@ -62,6 +66,27 @@ export interface NewFileTemplate {
   createdAt: number;
 }
 
+export interface ColorRule {
+  id: string;
+  label: string;
+  enabled: boolean;
+  target: ColorRuleTarget;
+  textColor: string;
+  backgroundColor: string;
+  nameMatch: ColorRuleNameMatch;
+  namePattern: string;
+  extensions: string;
+  sizeComparison: ColorRuleComparison;
+  sizeValueMB: number;
+  modifiedComparison: ColorRuleComparison;
+  modifiedValue: number;
+  modifiedUnit: ColorRuleTimeUnit;
+  createdComparison: ColorRuleComparison;
+  createdValue: number;
+  createdUnit: ColorRuleTimeUnit;
+  createdAt: number;
+}
+
 export interface BootstrapPayload {
   homePath: string;
   knownLocations: KnownLocation[];
@@ -96,6 +121,7 @@ export interface WorkspaceSnapshot {
   bookmarks: KnownLocation[];
   stashItems?: StashShelfItem[];
   fileTemplates?: NewFileTemplate[];
+  colorRules?: ColorRule[];
   savedAt: number;
 }
 

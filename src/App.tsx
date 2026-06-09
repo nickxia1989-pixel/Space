@@ -21,6 +21,7 @@ import {
   Monitor,
   MoreVertical,
   Music,
+  Palette,
   PanelRight,
   Pencil,
   Plus,
@@ -35,6 +36,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { getSpaceApi } from "./api";
 import {
   breadcrumbs,
@@ -47,6 +49,11 @@ import {
 import type {
   BootstrapPayload,
   ClipboardMode,
+  ColorRule,
+  ColorRuleComparison,
+  ColorRuleNameMatch,
+  ColorRuleTarget,
+  ColorRuleTimeUnit,
   FileEntry,
   HashAlgorithm,
   KnownLocation,
@@ -160,6 +167,29 @@ const defaultFileTemplates: NewFileTemplate[] = [
   }
 ];
 
+function createColorRule(label = "Archives"): ColorRule {
+  return {
+    id: `color-rule-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    label,
+    enabled: true,
+    target: "files",
+    textColor: "#fff2b7",
+    backgroundColor: "#4b3714",
+    nameMatch: "contains",
+    namePattern: "",
+    extensions: "zip, 7z, rar",
+    sizeComparison: "any",
+    sizeValueMB: 100,
+    modifiedComparison: "any",
+    modifiedValue: 1,
+    modifiedUnit: "days",
+    createdComparison: "any",
+    createdValue: 1,
+    createdUnit: "days",
+    createdAt: Date.now()
+  };
+}
+
 function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapshot {
   return {
     id,
@@ -227,6 +257,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     bookmarks: [],
     stashItems: [],
     fileTemplates: [],
+    colorRules: [],
     savedAt: Date.now()
   };
 }
@@ -242,6 +273,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     bookmarks: record.bookmarks ?? [],
     stashItems: record.stashItems ?? [],
     fileTemplates: record.fileTemplates ?? [],
+    colorRules: record.colorRules ?? [],
     savedAt: record.savedAt ?? Date.now()
   };
 }
@@ -310,6 +342,7 @@ export default function App() {
   const [bookmarks, setBookmarks] = useState<KnownLocation[]>([]);
   const [stashItems, setStashItems] = useState<StashShelfItem[]>([]);
   const [fileTemplates, setFileTemplates] = useState<NewFileTemplate[]>([]);
+  const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -319,6 +352,7 @@ export default function App() {
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [hashLine, setHashLine] = useState<string>("");
   const [newFileOpen, setNewFileOpen] = useState(false);
+  const [colorRulesOpen, setColorRulesOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
@@ -349,6 +383,7 @@ export default function App() {
         setBookmarks(workspace.bookmarks);
         setStashItems(workspace.stashItems ?? []);
         setFileTemplates(workspace.fileTemplates ?? []);
+        setColorRules(workspace.colorRules ?? []);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -399,6 +434,7 @@ export default function App() {
         bookmarks,
         stashItems,
         fileTemplates,
+        colorRules,
         savedAt: Date.now()
       };
       const workspaceDocument: WorkspaceDocument = {
@@ -411,7 +447,7 @@ export default function App() {
       void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, bookmarks, fileTemplates, initialized, layout, panes, stashItems, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, bookmarks, colorRules, fileTemplates, initialized, layout, panes, stashItems, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -444,6 +480,7 @@ export default function App() {
       bookmarks,
       stashItems,
       fileTemplates,
+      colorRules,
       savedAt: Date.now()
     };
   }
@@ -461,6 +498,7 @@ export default function App() {
     setBookmarks(workspace.bookmarks);
     setStashItems(workspace.stashItems ?? []);
     setFileTemplates(workspace.fileTemplates ?? []);
+    setColorRules(workspace.colorRules ?? []);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
@@ -1021,6 +1059,7 @@ export default function App() {
           <IconButton title="Batch rename" onClick={() => setBatchRenameOpen(true)} icon={FileText} disabled={!activePane?.selectedPaths.length} />
           <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
           <IconButton title="Add selection to shelf" onClick={addSelectionToShelf} icon={Plus} disabled={!activePane?.selectedPaths.length} />
+          <IconButton title="Color rules" onClick={() => setColorRulesOpen(true)} icon={Palette} active={colorRules.some((rule) => rule.enabled)} />
           <span className="toolbar-divider" />
           <IconButton title="Refresh" onClick={() => void refreshPane()} icon={RefreshCcw} />
           <IconButton title="Open terminal" onClick={() => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), [])} icon={Terminal} />
@@ -1073,6 +1112,7 @@ export default function App() {
               key={pane.id}
               pane={pane}
               entries={visibleEntries(pane)}
+              colorRules={colorRules}
               active={pane.id === activePaneId}
               onActivate={() => setActivePaneId(pane.id)}
               onNavigate={(targetPath) => void loadPane(pane.id, targetPath)}
@@ -1146,6 +1186,18 @@ export default function App() {
           onClose={() => setNewFileOpen(false)}
           onCreate={(request) => void createTemplatedFile(request)}
           onDeleteTemplate={(templateId) => setFileTemplates((current) => current.filter((template) => template.id !== templateId))}
+        />
+      )}
+
+      {colorRulesOpen && (
+        <ColorRulesModal
+          rules={colorRules}
+          onClose={() => setColorRulesOpen(false)}
+          onSave={(rules) => {
+            setColorRules(rules);
+            setColorRulesOpen(false);
+            showToast("success", "Color rules saved.");
+          }}
         />
       )}
 
@@ -1368,6 +1420,7 @@ function SidebarItem({ location, onOpen }: { location: KnownLocation; onOpen: (p
 function ExplorerPane({
   pane,
   entries,
+  colorRules,
   active,
   onActivate,
   onNavigate,
@@ -1392,6 +1445,7 @@ function ExplorerPane({
 }: {
   pane: PaneState;
   entries: FileEntry[];
+  colorRules: ColorRule[];
   active: boolean;
   onActivate: () => void;
   onNavigate: (path: string) => void;
@@ -1513,6 +1567,7 @@ function ExplorerPane({
           <DetailsList
             pane={pane}
             entries={entries}
+            colorRules={colorRules}
             onSort={onSort}
             onSelect={onSelect}
             onOpen={onOpen}
@@ -1523,6 +1578,7 @@ function ExplorerPane({
           <IconGrid
             pane={pane}
             entries={entries}
+            colorRules={colorRules}
             onSelect={onSelect}
             onOpen={onOpen}
             onContextMenu={onContextMenu}
@@ -1544,6 +1600,7 @@ function ExplorerPane({
 function DetailsList({
   pane,
   entries,
+  colorRules,
   onSort,
   onSelect,
   onOpen,
@@ -1552,6 +1609,7 @@ function DetailsList({
 }: {
   pane: PaneState;
   entries: FileEntry[];
+  colorRules: ColorRule[];
   onSort: (sortKey: SortKey) => void;
   onSelect: (entry: FileEntry, event: React.MouseEvent, entries: FileEntry[]) => void;
   onOpen: (entry: FileEntry) => void;
@@ -1569,25 +1627,31 @@ function DetailsList({
         ))}
       </div>
       <div className="details-body">
-        {entries.map((entry) => (
-          <button
-            key={entry.path}
-            className={`details-row ${containsPath(pane.selectedPaths, entry.path) ? "selected" : ""}`}
-            draggable
-            onClick={(event) => onSelect(entry, event, entries)}
-            onDoubleClick={() => onOpen(entry)}
-            onContextMenu={(event) => onContextMenu(event, entry)}
-            onDragStart={(event) => onDragStart(event, entry)}
-          >
-            <span className="file-name-cell">
-              {entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
-              <span>{entry.name}</span>
-            </span>
-            <span>{entry.isDirectory ? "" : formatBytes(entry.size)}</span>
-            <span>{formatDate(entry.modifiedAt)}</span>
-            <span>{entry.typeLabel}</span>
-          </button>
-        ))}
+        {entries.map((entry) => {
+          const selected = containsPath(pane.selectedPaths, entry.path);
+          const colorRule = getEntryColorRule(entry, colorRules);
+          return (
+            <button
+              key={entry.path}
+              className={`details-row ${selected ? "selected" : ""} ${colorRule ? "colorized" : ""}`}
+              style={colorRule?.style}
+              title={colorRule ? `${entry.path}\nRule: ${colorRule.label}` : entry.path}
+              draggable
+              onClick={(event) => onSelect(entry, event, entries)}
+              onDoubleClick={() => onOpen(entry)}
+              onContextMenu={(event) => onContextMenu(event, entry)}
+              onDragStart={(event) => onDragStart(event, entry)}
+            >
+              <span className="file-name-cell">
+                {entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
+                <span>{entry.name}</span>
+              </span>
+              <span>{entry.isDirectory ? "" : formatBytes(entry.size)}</span>
+              <span>{formatDate(entry.modifiedAt)}</span>
+              <span>{entry.typeLabel}</span>
+            </button>
+          );
+        })}
         {entries.length === 0 && <div className="empty-folder">No items match this view.</div>}
       </div>
     </div>
@@ -1597,6 +1661,7 @@ function DetailsList({
 function IconGrid({
   pane,
   entries,
+  colorRules,
   onSelect,
   onOpen,
   onContextMenu,
@@ -1604,6 +1669,7 @@ function IconGrid({
 }: {
   pane: PaneState;
   entries: FileEntry[];
+  colorRules: ColorRule[];
   onSelect: (entry: FileEntry, event: React.MouseEvent, entries: FileEntry[]) => void;
   onOpen: (entry: FileEntry) => void;
   onContextMenu: (event: React.MouseEvent, entry?: FileEntry) => void;
@@ -1611,23 +1677,105 @@ function IconGrid({
 }) {
   return (
     <div className="icon-grid">
-      {entries.map((entry) => (
-        <button
-          key={entry.path}
-          className={`icon-tile ${containsPath(pane.selectedPaths, entry.path) ? "selected" : ""}`}
-          draggable
-          onClick={(event) => onSelect(entry, event, entries)}
-          onDoubleClick={() => onOpen(entry)}
-          onContextMenu={(event) => onContextMenu(event, entry)}
-          onDragStart={(event) => onDragStart(event, entry)}
-        >
-          {entry.isDirectory ? <Folder size={28} /> : <File size={28} />}
-          <span>{entry.name}</span>
-        </button>
-      ))}
+      {entries.map((entry) => {
+        const selected = containsPath(pane.selectedPaths, entry.path);
+        const colorRule = getEntryColorRule(entry, colorRules);
+        return (
+          <button
+            key={entry.path}
+            className={`icon-tile ${selected ? "selected" : ""} ${colorRule ? "colorized" : ""}`}
+            style={colorRule?.style}
+            title={colorRule ? `${entry.path}\nRule: ${colorRule.label}` : entry.path}
+            draggable
+            onClick={(event) => onSelect(entry, event, entries)}
+            onDoubleClick={() => onOpen(entry)}
+            onContextMenu={(event) => onContextMenu(event, entry)}
+            onDragStart={(event) => onDragStart(event, entry)}
+          >
+            {entry.isDirectory ? <Folder size={28} /> : <File size={28} />}
+            <span>{entry.name}</span>
+          </button>
+        );
+      })}
       {entries.length === 0 && <div className="empty-folder">No items match this view.</div>}
     </div>
   );
+}
+
+interface EntryColorRuleStyle {
+  label: string;
+  style: CSSProperties;
+}
+
+function getEntryColorRule(entry: FileEntry, colorRules: ColorRule[]): EntryColorRuleStyle | null {
+  const matchedRule = colorRules.find((rule) => colorRuleMatches(rule, entry));
+  if (!matchedRule) return null;
+  return {
+    label: matchedRule.label,
+    style: {
+      "--space-rule-text": matchedRule.textColor,
+      "--space-rule-bg": matchedRule.backgroundColor
+    } as CSSProperties
+  };
+}
+
+function colorRuleMatches(rule: ColorRule, entry: FileEntry, now = Date.now()): boolean {
+  if (!rule.enabled) return false;
+  if (rule.target === "files" && !entry.isFile) return false;
+  if (rule.target === "folders" && !entry.isDirectory) return false;
+  if (!matchesNameRule(rule, entry.name)) return false;
+  if (!matchesExtensionRule(rule.extensions, entry.extension)) return false;
+  if (!matchesNumberComparison(entry.size / (1024 * 1024), rule.sizeComparison, rule.sizeValueMB)) return false;
+  if (!matchesAgeComparison(now - entry.modifiedAt, rule.modifiedComparison, rule.modifiedValue, rule.modifiedUnit)) return false;
+  if (!matchesAgeComparison(now - entry.createdAt, rule.createdComparison, rule.createdValue, rule.createdUnit)) return false;
+  return true;
+}
+
+function matchesNameRule(rule: ColorRule, name: string): boolean {
+  const pattern = rule.namePattern.trim();
+  if (!pattern) return true;
+  const haystack = name.toLowerCase();
+  const needle = pattern.toLowerCase();
+  if (rule.nameMatch === "startsWith") return haystack.startsWith(needle);
+  if (rule.nameMatch === "endsWith") return haystack.endsWith(needle);
+  if (rule.nameMatch === "equals") return haystack === needle;
+  if (rule.nameMatch === "regex") {
+    try {
+      return new RegExp(pattern, "i").test(name);
+    } catch {
+      return false;
+    }
+  }
+  return haystack.includes(needle);
+}
+
+function matchesExtensionRule(rawExtensions: string, entryExtension: string): boolean {
+  const extensions = rawExtensions
+    .split(/[\s,;]+/)
+    .map((extension) => extension.trim().toLowerCase())
+    .filter(Boolean)
+    .map((extension) => (extension.startsWith(".") ? extension : `.${extension}`));
+  if (extensions.length === 0) return true;
+  return extensions.includes(entryExtension.toLowerCase());
+}
+
+function matchesNumberComparison(value: number, comparison: ColorRuleComparison, threshold: number): boolean {
+  if (comparison === "any") return true;
+  if (!Number.isFinite(threshold) || threshold < 0) return false;
+  return comparison === "greaterThan" ? value > threshold : value < threshold;
+}
+
+function matchesAgeComparison(ageMs: number, comparison: ColorRuleComparison, value: number, unit: ColorRuleTimeUnit): boolean {
+  if (comparison === "any") return true;
+  if (!Number.isFinite(value) || value < 0) return false;
+  const thresholdMs = value * timeUnitMs(unit);
+  return comparison === "greaterThan" ? ageMs > thresholdMs : ageMs < thresholdMs;
+}
+
+function timeUnitMs(unit: ColorRuleTimeUnit): number {
+  if (unit === "minutes") return 60 * 1000;
+  if (unit === "hours") return 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
 }
 
 function Inspector({
@@ -1978,6 +2126,225 @@ function NewFileModal({
             onClick={() => onCreate({ name: fileName, content, saveTemplateName: saveAsTemplate ? templateName : undefined })}
           >
             Create
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function ColorRulesModal({
+  rules,
+  onClose,
+  onSave
+}: {
+  rules: ColorRule[];
+  onClose: () => void;
+  onSave: (rules: ColorRule[]) => void;
+}) {
+  const [draftRules, setDraftRules] = useState<ColorRule[]>(rules.map((rule) => ({ ...rule })));
+  const [selectedId, setSelectedId] = useState(rules[0]?.id ?? "");
+  const selectedRule = draftRules.find((rule) => rule.id === selectedId) ?? draftRules[0] ?? null;
+
+  function addRule() {
+    const nextRule = createColorRule(`Rule ${draftRules.length + 1}`);
+    setDraftRules((current) => [...current, nextRule]);
+    setSelectedId(nextRule.id);
+  }
+
+  function updateRule<K extends keyof ColorRule>(key: K, value: ColorRule[K]) {
+    if (!selectedRule) return;
+    setDraftRules((current) => current.map((rule) => (rule.id === selectedRule.id ? { ...rule, [key]: value } : rule)));
+  }
+
+  function deleteRule() {
+    if (!selectedRule) return;
+    const remaining = draftRules.filter((rule) => rule.id !== selectedRule.id);
+    setDraftRules(remaining);
+    setSelectedId(remaining[0]?.id ?? "");
+  }
+
+  function saveRules() {
+    onSave(
+      draftRules.map((rule) => ({
+        ...rule,
+        label: rule.label.trim() || "Untitled rule",
+        extensions: rule.extensions.trim(),
+        namePattern: rule.namePattern.trim(),
+        sizeValueMB: Math.max(0, rule.sizeValueMB || 0),
+        modifiedValue: Math.max(0, rule.modifiedValue || 0),
+        createdValue: Math.max(0, rule.createdValue || 0)
+      }))
+    );
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal color-rules-modal" role="dialog" aria-modal="true" aria-label="Color rules">
+        <header className="modal-header">
+          <div>
+            <h2>Color Rules</h2>
+            <span>Highlight matching files and folders in every pane.</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="color-rules-body">
+          <div className="color-rule-list" aria-label="Color rule list">
+            <button className="add-rule-button" onClick={addRule}>
+              Add Rule
+            </button>
+            {draftRules.length === 0 && <p className="empty-note">No color rules configured.</p>}
+            {draftRules.map((rule) => (
+              <button
+                key={rule.id}
+                className={rule.id === selectedRule?.id ? "active" : ""}
+                onClick={() => setSelectedId(rule.id)}
+              >
+                <span className="rule-swatch" style={{ background: rule.backgroundColor, color: rule.textColor }}>
+                  Aa
+                </span>
+                <span>{rule.label || "Untitled rule"}</span>
+                <small>{rule.enabled ? "Enabled" : "Disabled"}</small>
+              </button>
+            ))}
+          </div>
+
+          {selectedRule ? (
+            <div className="color-rule-editor">
+              <label className="check-row rule-enabled">
+                <input
+                  type="checkbox"
+                  checked={selectedRule.enabled}
+                  onChange={(event) => updateRule("enabled", event.target.checked)}
+                />
+                Enabled
+              </label>
+              <label>
+                Rule name
+                <input value={selectedRule.label} onChange={(event) => updateRule("label", event.target.value)} />
+              </label>
+              <label>
+                Target
+                <select value={selectedRule.target} onChange={(event) => updateRule("target", event.target.value as ColorRuleTarget)}>
+                  <option value="all">Files and folders</option>
+                  <option value="files">Files only</option>
+                  <option value="folders">Folders only</option>
+                </select>
+              </label>
+              <label>
+                Text color
+                <input type="color" value={selectedRule.textColor} onChange={(event) => updateRule("textColor", event.target.value)} />
+              </label>
+              <label>
+                Background
+                <input type="color" value={selectedRule.backgroundColor} onChange={(event) => updateRule("backgroundColor", event.target.value)} />
+              </label>
+              <label>
+                Name match
+                <select value={selectedRule.nameMatch} onChange={(event) => updateRule("nameMatch", event.target.value as ColorRuleNameMatch)}>
+                  <option value="contains">Contains</option>
+                  <option value="startsWith">Starts with</option>
+                  <option value="endsWith">Ends with</option>
+                  <option value="equals">Equals</option>
+                  <option value="regex">Regex</option>
+                </select>
+              </label>
+              <label>
+                Name pattern
+                <input value={selectedRule.namePattern} onChange={(event) => updateRule("namePattern", event.target.value)} spellCheck={false} />
+              </label>
+              <label>
+                Extensions
+                <input
+                  value={selectedRule.extensions}
+                  onChange={(event) => updateRule("extensions", event.target.value)}
+                  placeholder="zip, psd, png"
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                Size
+                <select value={selectedRule.sizeComparison} onChange={(event) => updateRule("sizeComparison", event.target.value as ColorRuleComparison)}>
+                  <option value="any">Any size</option>
+                  <option value="greaterThan">Greater than</option>
+                  <option value="lessThan">Less than</option>
+                </select>
+              </label>
+              <label>
+                Size MB
+                <input
+                  type="number"
+                  min="0"
+                  value={selectedRule.sizeValueMB}
+                  onChange={(event) => updateRule("sizeValueMB", Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Modified age
+                <select value={selectedRule.modifiedComparison} onChange={(event) => updateRule("modifiedComparison", event.target.value as ColorRuleComparison)}>
+                  <option value="any">Any time</option>
+                  <option value="greaterThan">Older than</option>
+                  <option value="lessThan">Within</option>
+                </select>
+              </label>
+              <label>
+                Modified value
+                <input
+                  type="number"
+                  min="0"
+                  value={selectedRule.modifiedValue}
+                  onChange={(event) => updateRule("modifiedValue", Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Modified unit
+                <select value={selectedRule.modifiedUnit} onChange={(event) => updateRule("modifiedUnit", event.target.value as ColorRuleTimeUnit)}>
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </label>
+              <label>
+                Created age
+                <select value={selectedRule.createdComparison} onChange={(event) => updateRule("createdComparison", event.target.value as ColorRuleComparison)}>
+                  <option value="any">Any time</option>
+                  <option value="greaterThan">Older than</option>
+                  <option value="lessThan">Within</option>
+                </select>
+              </label>
+              <label>
+                Created value
+                <input
+                  type="number"
+                  min="0"
+                  value={selectedRule.createdValue}
+                  onChange={(event) => updateRule("createdValue", Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Created unit
+                <select value={selectedRule.createdUnit} onChange={(event) => updateRule("createdUnit", event.target.value as ColorRuleTimeUnit)}>
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </label>
+            </div>
+          ) : (
+            <div className="color-rule-empty">
+              <p className="empty-note">Add a rule to start highlighting files.</p>
+            </div>
+          )}
+        </div>
+
+        <footer className="modal-footer">
+          <button disabled={!selectedRule} onClick={deleteRule}>
+            Delete Rule
+          </button>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={saveRules}>
+            Save Rules
           </button>
         </footer>
       </section>

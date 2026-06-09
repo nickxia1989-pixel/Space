@@ -674,6 +674,18 @@ button:disabled {
   color: #ffffff;
 }
 
+.details-row.colorized:not(.selected),
+.icon-tile.colorized:not(.selected) {
+  color: var(--space-rule-text);
+  background: var(--space-rule-bg);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.details-row.colorized:not(.selected):hover,
+.icon-tile.colorized:not(.selected):hover {
+  filter: brightness(1.08);
+}
+
 .details-row span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -975,16 +987,29 @@ button:disabled {
   width: min(900px, 100%);
 }
 
-.new-file-body {
+.color-rules-modal {
+  width: min(980px, 100%);
+}
+
+.new-file-body,
+.color-rules-body {
   min-height: 0;
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
   gap: 12px;
   padding: 14px 16px;
   overflow: hidden;
 }
 
-.template-list {
+.new-file-body {
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+
+.color-rules-body {
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.template-list,
+.color-rule-list {
   min-height: 0;
   overflow: auto;
   display: flex;
@@ -992,7 +1017,8 @@ button:disabled {
   gap: 6px;
 }
 
-.template-list button {
+.template-list button,
+.color-rule-list button {
   min-height: 48px;
   display: grid;
   gap: 2px;
@@ -1000,29 +1026,70 @@ button:disabled {
   text-align: left;
 }
 
-.template-list button.active {
+.color-rule-list button {
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+}
+
+.color-rule-list .add-rule-button {
+  min-height: 34px;
+  display: block;
+  text-align: center;
+}
+
+.template-list button.active,
+.color-rule-list button.active {
   color: #0d1218;
   border-color: transparent;
   background: #9ee7d7;
 }
 
 .template-list button span,
-.template-list button small {
+.template-list button small,
+.color-rule-list button span,
+.color-rule-list button small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.template-list button small {
+.template-list button small,
+.color-rule-list button small {
   color: inherit;
   opacity: 0.72;
 }
 
-.template-editor {
+.rule-swatch {
+  grid-row: 1 / span 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.template-editor,
+.color-rule-editor {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.color-rule-editor {
+  align-content: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: auto;
+}
+
+.color-rule-empty {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
 }
 
 .template-content-label {
@@ -1042,7 +1109,8 @@ button:disabled {
 
 .rename-form label,
 .sync-form label,
-.template-editor label {
+.template-editor label,
+.color-rule-editor label {
   min-width: 0;
   display: grid;
   gap: 5px;
@@ -1054,7 +1122,9 @@ button:disabled {
 .rename-form select,
 .sync-form input,
 .sync-form select,
-.template-editor input {
+.template-editor input,
+.color-rule-editor input,
+.color-rule-editor select {
   min-width: 0;
   height: 30px;
   padding: 0 8px;
@@ -1066,18 +1136,29 @@ button:disabled {
 .sync-form input:focus,
 .sync-form select:focus,
 .template-editor input:focus,
-.template-editor textarea:focus {
+.template-editor textarea:focus,
+.color-rule-editor input:focus,
+.color-rule-editor select:focus {
   border-color: rgba(158, 231, 215, 0.78);
 }
 
 .rename-form .check-row,
 .sync-form .check-row,
-.template-editor .check-row {
+.template-editor .check-row,
+.color-rule-editor .check-row {
   display: flex;
   align-items: center;
   gap: 7px;
   min-height: 30px;
   color: #c7d2e3;
+}
+
+.color-rule-editor .rule-enabled {
+  grid-column: 1 / -1;
+}
+
+.color-rule-editor input[type="color"] {
+  padding: 3px;
 }
 
 .check-row input {
