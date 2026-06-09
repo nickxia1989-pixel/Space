@@ -837,6 +837,7 @@ export default function App() {
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
   const toastCounter = useRef(0);
   const addressSuggestionCounters = useRef<Record<number, number>>({});
+  const paneLoadCounters = useRef<Record<number, number>>({});
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
@@ -851,6 +852,16 @@ export default function App() {
 
   function selectedEntriesForPane(pane: PaneState | undefined): FileEntry[] {
     return pane ? pane.entries.filter((entry) => containsPath(pane.selectedPaths, entry.path)) : [];
+  }
+
+  function nextPaneLoadRequest(paneId: number): number {
+    const requestId = (paneLoadCounters.current[paneId] ?? 0) + 1;
+    paneLoadCounters.current[paneId] = requestId;
+    return requestId;
+  }
+
+  function isCurrentPaneLoadRequest(paneId: number, requestId: number): boolean {
+    return paneLoadCounters.current[paneId] === requestId;
   }
 
   useEffect(() => {
@@ -1142,11 +1153,13 @@ export default function App() {
   }
 
   async function loadPane(paneId: number, targetPath: string, mode: "push" | "replace" = "push") {
+    const requestId = nextPaneLoadRequest(paneId);
     setActivePaneId(paneId);
     clearAddressSuggestions(paneId);
     updatePane(paneId, (pane) => ({ ...pane, loading: true, error: undefined, addressDraft: targetPath }));
     try {
       const payload = await api.listDirectory(targetPath);
+      if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
       updatePane(paneId, (pane) => {
         let history = pane.history;
         let historyIndex = pane.historyIndex;
@@ -1172,6 +1185,7 @@ export default function App() {
         };
       });
     } catch (error) {
+      if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
       updatePane(paneId, (pane) => ({ ...pane, loading: false, error: getErrorMessage(error) }));
       showToast("error", getErrorMessage(error));
     }
@@ -1194,6 +1208,7 @@ export default function App() {
       await refreshPane(paneId);
       return;
     }
+    const requestId = nextPaneLoadRequest(paneId);
     updatePane(paneId, (current) => ({ ...current, loading: true, error: undefined }));
     try {
       const entries = await api.searchFiles({
@@ -1202,6 +1217,7 @@ export default function App() {
         recursive: pane.recursiveSearch,
         limit: 500
       });
+      if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
       updatePane(paneId, (current) => ({
         ...current,
         entries,
@@ -1210,6 +1226,7 @@ export default function App() {
         scannedAt: Date.now()
       }));
     } catch (error) {
+      if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
       updatePane(paneId, (current) => ({ ...current, loading: false, error: getErrorMessage(error) }));
     }
   }
@@ -1220,12 +1237,14 @@ export default function App() {
     const nextIndex = pane.historyIndex + direction;
     const nextPath = pane.history[nextIndex];
     if (!nextPath) return;
+    const requestId = nextPaneLoadRequest(paneId);
     setActivePaneId(paneId);
     clearAddressSuggestions(paneId);
     updatePane(paneId, (current) => ({ ...current, loading: true, error: undefined, addressDraft: nextPath }));
     api
       .listDirectory(nextPath)
       .then((payload) => {
+        if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
         updatePane(paneId, (current) => ({
           ...current,
           path: payload.path,
@@ -1241,6 +1260,7 @@ export default function App() {
         }));
       })
       .catch((error: unknown) => {
+        if (!isCurrentPaneLoadRequest(paneId, requestId)) return;
         updatePane(paneId, (current) => ({ ...current, loading: false, error: getErrorMessage(error) }));
         showToast("error", getErrorMessage(error));
       });

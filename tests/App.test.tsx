@@ -1,12 +1,44 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
-import type { SpaceApi, WorkspaceDocument } from "../src/shared";
+import type { DirectoryPayload, FileEntry, SpaceApi, WorkspaceDocument } from "../src/shared";
 
 function readSavedWorkspace(): WorkspaceDocument | null {
   const raw = window.localStorage.getItem("space.mock.workspace");
   return raw ? (JSON.parse(raw) as WorkspaceDocument) : null;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function testEntry(parentPath: string, name: string, isDirectory = false): FileEntry {
+  const path = `${parentPath}\\${name}`;
+  return {
+    name,
+    path,
+    parentPath,
+    isDirectory,
+    isFile: !isDirectory,
+    isSymlink: false,
+    size: isDirectory ? 0 : 128,
+    modifiedAt: 1,
+    createdAt: 1,
+    extension: isDirectory || !name.includes(".") ? "" : `.${name.split(".").pop()}`,
+    typeLabel: isDirectory ? "Folder" : "File",
+    hidden: false
+  };
+}
+
+function testDirectory(path: string, entries: FileEntry[]): DirectoryPayload {
+  return { path, entries, scannedAt: 1 };
 }
 
 function writeLegacyActionWorkspace(): void {
@@ -150,6 +182,64 @@ describe("App", () => {
         "C:\\Users\\Traveler\\Downloads"
       ]);
     });
+  });
+
+  it("keeps the newest pane navigation result when directory loads finish out of order", async () => {
+    const homePath = "C:\\Users\\Traveler";
+    const slowPath = `${homePath}\\Slow`;
+    const fastPath = `${homePath}\\Fast`;
+    const slowDirectory = deferred<DirectoryPayload>();
+    const fastDirectory = deferred<DirectoryPayload>();
+    const listDirectory = vi.fn((path: string) => {
+      if (path === slowPath) return slowDirectory.promise;
+      if (path === fastPath) return fastDirectory.promise;
+      const entries =
+        path === homePath
+          ? [testEntry(homePath, "Slow", true), testEntry(homePath, "Fast", true)]
+          : [];
+      return Promise.resolve(testDirectory(path, entries));
+    });
+    window.spaceAPI = {
+      bootstrap: vi.fn().mockResolvedValue({
+        homePath,
+        knownLocations: [
+          { id: "home", label: "Home", path: homePath, icon: "home" },
+          { id: "desktop", label: "Desktop", path: `${homePath}\\Desktop`, icon: "monitor" },
+          { id: "documents", label: "Documents", path: `${homePath}\\Documents`, icon: "file-text" },
+          { id: "downloads", label: "Downloads", path: `${homePath}\\Downloads`, icon: "download" }
+        ],
+        drives: []
+      }),
+      getWorkspace: vi.fn().mockResolvedValue(null),
+      saveWorkspace: vi.fn().mockResolvedValue({ ok: true, message: "Saved." }),
+      listDirectory
+    } as unknown as SpaceApi;
+
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Slow")).toBeInTheDocument());
+    const address = within(pane).getByDisplayValue(homePath);
+    const addressForm = address.closest("form");
+    expect(addressForm).not.toBeNull();
+
+    fireEvent.change(address, { target: { value: slowPath } });
+    fireEvent.submit(addressForm!);
+    fireEvent.change(address, { target: { value: fastPath } });
+    fireEvent.submit(addressForm!);
+
+    await act(async () => {
+      fastDirectory.resolve(testDirectory(fastPath, [testEntry(fastPath, "Fast File.txt")]));
+    });
+    expect(await within(pane).findByText("Fast File.txt")).toBeInTheDocument();
+
+    await act(async () => {
+      slowDirectory.resolve(testDirectory(slowPath, [testEntry(slowPath, "Slow File.txt")]));
+    });
+
+    await waitFor(() => expect(within(pane).getByDisplayValue(fastPath)).toBeInTheDocument());
+    expect(within(pane).getByText("Fast File.txt")).toBeInTheDocument();
+    expect(within(pane).queryByText("Slow File.txt")).not.toBeInTheDocument();
   });
 
   it("creates files from the new file template panel", async () => {
