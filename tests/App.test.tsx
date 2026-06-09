@@ -23,4 +23,18 @@ describe("App", () => {
     await user.click(screen.getAllByLabelText("Icon view")[0]);
     expect(screen.getAllByLabelText("Icon view")[0]).toHaveClass("active");
   });
+
+  it("opens advanced batch rename and folder sync panels", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(screen.getByLabelText("Batch rename"));
+    expect(screen.getByRole("dialog", { name: "Batch rename" })).toBeInTheDocument();
+    await user.click(screen.getByText("Close"));
+
+    await user.click(screen.getByLabelText("Folder sync"));
+    expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
+  });
 });

@@ -11,6 +11,8 @@
 | Local file operations | `tests/fileService.test.ts` temp-directory lifecycle |
 | Cross-pane transfer commands | Renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
+| Batch rename | `tests/fileService.test.ts` preview/apply/conflict coverage |
+| Folder sync | `tests/fileService.test.ts` one-way missing/newer file coverage |
 | Workspace persistence | `electron/workspaceStore.ts`; smoke launch loads app with store available |
 | Type safety | `npm run typecheck` |
 | Production build | `npm run build` |
@@ -40,7 +42,9 @@ Expected result: all commands exit with code `0`.
 8. Toggle details/icon view in a single pane and verify the other panes retain their own view state.
 9. Filter a pane by keyword and run recursive search with `Subfolders` checked.
 10. Select a text or image file and verify the inspector preview, metadata, reveal action, and SHA-256 action.
-11. Restart the app and confirm pane locations, layout, active pane, and bookmarks are restored.
+11. Select multiple files, open Batch Rename, confirm preview status, apply, and verify renamed files appear in the pane.
+12. Open two folders in separate panes, use Folder Sync, confirm the preview direction, apply, and verify missing/newer files copy to the target folder.
+13. Restart the app and confirm pane locations, layout, active pane, and bookmarks are restored.
 
 ## Browser Renderer Checks
 

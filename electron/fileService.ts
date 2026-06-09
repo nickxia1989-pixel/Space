@@ -6,12 +6,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   BootstrapPayload,
+  BatchRenamePreview,
+  BatchRenamePreviewItem,
+  BatchRenameRequest,
   CreateItemRequest,
   DeleteRequest,
   DirectoryPayload,
   DriveInfo,
   FileEntry,
   FileOperationRequest,
+  FolderSyncAction,
+  FolderSyncPlan,
+  FolderSyncRequest,
   HashPayload,
   HashRequest,
   KnownLocation,
@@ -380,6 +386,232 @@ export async function calculateHash(request: HashRequest): Promise<HashPayload> 
     algorithm: request.algorithm,
     value: hash.digest("hex")
   };
+}
+
+export function buildBatchRenamePreview(request: BatchRenameRequest): BatchRenamePreview {
+  const targetCounts = new Map<string, number>();
+  const items = request.paths.map((sourcePath, index) => {
+    const resolvedPath = normalizeInputPath(sourcePath);
+    const sourceName = path.basename(resolvedPath);
+    const targetName = buildTargetName(sourceName, request.rule, index);
+    const targetPath = path.join(path.dirname(resolvedPath), targetName);
+    targetCounts.set(targetPath.toLowerCase(), (targetCounts.get(targetPath.toLowerCase()) ?? 0) + 1);
+    return {
+      sourcePath: resolvedPath,
+      targetPath,
+      sourceName,
+      targetName,
+      status: "ready" as const
+    };
+  });
+
+  const previewItems: BatchRenamePreviewItem[] = items.map((item) => {
+    const invalidMessage = validateTargetFileName(item.targetName);
+    if (invalidMessage) {
+      return { ...item, status: "invalid", message: invalidMessage };
+    }
+    if (item.sourcePath.toLowerCase() === item.targetPath.toLowerCase()) {
+      return { ...item, status: "unchanged", message: "Name is unchanged." };
+    }
+    if ((targetCounts.get(item.targetPath.toLowerCase()) ?? 0) > 1) {
+      return { ...item, status: "conflict", message: "Another selected item would use the same name." };
+    }
+    return item;
+  });
+
+  return {
+    items: previewItems,
+    canApply: previewItems.some((item) => item.status === "ready") && previewItems.every((item) => item.status === "ready" || item.status === "unchanged")
+  };
+}
+
+export async function previewBatchRename(request: BatchRenameRequest): Promise<BatchRenamePreview> {
+  const preview = buildBatchRenamePreview(request);
+  const checkedItems = await Promise.all(
+    preview.items.map(async (item) => {
+      if (item.status !== "ready") return item;
+      if (await pathExists(item.targetPath)) {
+        return { ...item, status: "conflict" as const, message: "A file or folder already exists with this name." };
+      }
+      return item;
+    })
+  );
+  return {
+    items: checkedItems,
+    canApply: checkedItems.some((item) => item.status === "ready") && checkedItems.every((item) => item.status === "ready" || item.status === "unchanged")
+  };
+}
+
+export async function applyBatchRename(request: BatchRenameRequest): Promise<OperationResult> {
+  const preview = await previewBatchRename(request);
+  if (!preview.canApply) {
+    throw new Error("Batch rename has conflicts or invalid names.");
+  }
+  const affectedPaths: string[] = [];
+  for (const item of preview.items) {
+    if (item.status === "unchanged") continue;
+    await fsp.rename(item.sourcePath, item.targetPath);
+    affectedPaths.push(item.targetPath);
+  }
+  return { ok: true, message: `Renamed ${affectedPaths.length} item(s).`, affectedPaths };
+}
+
+function buildTargetName(sourceName: string, rule: BatchRenameRequest["rule"], index: number): string {
+  const parsed = path.parse(sourceName);
+  const sequenceValue = rule.startNumber + index * rule.step;
+  const sequence = String(sequenceValue).padStart(Math.max(1, rule.padLength), "0");
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const extension = parsed.ext.startsWith(".") ? parsed.ext.slice(1) : parsed.ext;
+  let workingName = rule.includeExtension ? sourceName : parsed.name;
+
+  if (rule.find) {
+    if (rule.useRegex) {
+      const flags = rule.caseSensitive ? "g" : "gi";
+      workingName = workingName.replace(new RegExp(rule.find, flags), rule.replace);
+    } else {
+      workingName = replaceLiteral(workingName, rule.find, rule.replace, rule.caseSensitive);
+    }
+  }
+
+  workingName = applyCaseMode(workingName, rule.caseMode);
+  const format = rule.pattern.trim() || "{name}";
+  const formatted = format
+    .replaceAll("{name}", workingName)
+    .replaceAll("{ext}", extension)
+    .replaceAll("{n}", sequence)
+    .replaceAll("{date}", date);
+  const composed = `${rule.prefix}${formatted}${rule.suffix}`;
+  return rule.includeExtension ? composed : `${composed}${parsed.ext}`;
+}
+
+function replaceLiteral(value: string, find: string, replace: string, caseSensitive: boolean): string {
+  if (caseSensitive) return value.split(find).join(replace);
+  const escaped = find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(new RegExp(escaped, "gi"), replace);
+}
+
+function applyCaseMode(value: string, mode: BatchRenameRequest["rule"]["caseMode"]): string {
+  if (mode === "lower") return value.toLowerCase();
+  if (mode === "upper") return value.toUpperCase();
+  if (mode === "title") {
+    return value.replace(/\p{L}[\p{L}\p{N}]*/gu, (part) => part[0].toUpperCase() + part.slice(1).toLowerCase());
+  }
+  return value;
+}
+
+function validateTargetFileName(name: string): string | undefined {
+  if (!name.trim()) return "Name cannot be empty.";
+  if (/[<>:"/\\|?*]/.test(name)) return "Name contains characters Windows does not allow.";
+  if (/[. ]$/.test(name)) return "Name cannot end with a space or period.";
+  return undefined;
+}
+
+export async function previewFolderSync(request: FolderSyncRequest): Promise<FolderSyncPlan> {
+  const leftPath = normalizeInputPath(request.leftPath);
+  const rightPath = normalizeInputPath(request.rightPath);
+  if (leftPath.toLowerCase() === rightPath.toLowerCase()) {
+    throw new Error("Choose two different folders to synchronize.");
+  }
+  const leftFiles = await collectSyncFiles(leftPath, request);
+  const rightFiles = await collectSyncFiles(rightPath, request);
+  const actions: FolderSyncAction[] = [];
+
+  if (request.direction === "updateRight" || request.direction === "updateBoth") {
+    for (const [relativePath, leftFile] of leftFiles.files) {
+      const rightFile = rightFiles.files.get(relativePath);
+      if (!rightFile || leftFile.modifiedAt > rightFile.modifiedAt + 1000) {
+        actions.push({
+          type: "copyLeftToRight",
+          relativePath,
+          sourcePath: leftFile.path,
+          destinationPath: path.join(rightPath, relativePath),
+          reason: rightFile ? "newer" : "missing",
+          size: leftFile.size,
+          modifiedAt: leftFile.modifiedAt
+        });
+      }
+    }
+  }
+
+  if (request.direction === "updateLeft" || request.direction === "updateBoth") {
+    for (const [relativePath, rightFile] of rightFiles.files) {
+      const leftFile = leftFiles.files.get(relativePath);
+      if (!leftFile || rightFile.modifiedAt > leftFile.modifiedAt + 1000) {
+        actions.push({
+          type: "copyRightToLeft",
+          relativePath,
+          sourcePath: rightFile.path,
+          destinationPath: path.join(leftPath, relativePath),
+          reason: leftFile ? "newer" : "missing",
+          size: rightFile.size,
+          modifiedAt: rightFile.modifiedAt
+        });
+      }
+    }
+  }
+
+  return {
+    leftPath,
+    rightPath,
+    actions: actions.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true })),
+    skipped: leftFiles.skipped + rightFiles.skipped
+  };
+}
+
+export async function applyFolderSync(request: FolderSyncRequest): Promise<OperationResult> {
+  const plan = await previewFolderSync(request);
+  const affectedPaths: string[] = [];
+  for (const action of plan.actions) {
+    await fsp.mkdir(path.dirname(action.destinationPath), { recursive: true });
+    await fsp.copyFile(action.sourcePath, action.destinationPath);
+    await fsp.utimes(action.destinationPath, new Date(), new Date(action.modifiedAt));
+    affectedPaths.push(action.destinationPath);
+  }
+  return {
+    ok: true,
+    message: plan.actions.length ? `Synchronized ${plan.actions.length} item(s).` : "Folders are already synchronized.",
+    affectedPaths
+  };
+}
+
+async function collectSyncFiles(rootPath: string, request: FolderSyncRequest): Promise<{ files: Map<string, FileEntry>; skipped: number }> {
+  const files = new Map<string, FileEntry>();
+  let skipped = 0;
+  const normalizedFilter = request.filter.trim().toLowerCase();
+
+  async function scan(directoryPath: string): Promise<void> {
+    let names: string[];
+    try {
+      names = await fsp.readdir(directoryPath);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const childPath = path.join(directoryPath, name);
+      let entry: FileEntry;
+      try {
+        entry = await getFileEntry(childPath);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      const relativePath = path.relative(rootPath, childPath);
+      if (!request.includeHidden && entry.hidden) {
+        skipped += 1;
+        continue;
+      }
+      if (entry.isDirectory) {
+        await scan(childPath);
+      } else if (!normalizedFilter || relativePath.toLowerCase().includes(normalizedFilter)) {
+        files.set(relativePath, entry);
+      } else {
+        skipped += 1;
+      }
+    }
+  }
+
+  await scan(rootPath);
+  return { files, skipped };
 }
 
 export async function openTerminal(directoryPath: string): Promise<OperationResult> {

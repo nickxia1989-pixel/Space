@@ -49,6 +49,10 @@ import type {
   KnownLocation,
   LayoutMode,
   OperationResult,
+  BatchRenamePreview,
+  BatchRenameRule,
+  FolderSyncDirection,
+  FolderSyncPlan,
   SortDirection,
   SortKey,
   SpaceApi,
@@ -212,6 +216,8 @@ export default function App() {
   const [initialized, setInitialized] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [hashLine, setHashLine] = useState<string>("");
+  const [batchRenameOpen, setBatchRenameOpen] = useState(false);
+  const [folderSyncOpen, setFolderSyncOpen] = useState(false);
   const toastCounter = useRef(0);
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
@@ -533,6 +539,41 @@ export default function App() {
     }
   }
 
+  async function applyBatchRename(rule: BatchRenameRule) {
+    if (!activePane?.selectedPaths.length) return;
+    await perform(
+      "Batch rename",
+      () => api.applyBatchRename({ paths: activePane.selectedPaths, rule }),
+      [activePane.id]
+    );
+    setBatchRenameOpen(false);
+  }
+
+  async function applyFolderSync(request: {
+    leftPaneId: number;
+    rightPaneId: number;
+    direction: FolderSyncDirection;
+    includeHidden: boolean;
+    filter: string;
+  }) {
+    const leftPane = panes.find((pane) => pane.id === request.leftPaneId);
+    const rightPane = panes.find((pane) => pane.id === request.rightPaneId);
+    if (!leftPane || !rightPane || leftPane.id === rightPane.id) return;
+    await perform(
+      "Folder sync",
+      () =>
+        api.applyFolderSync({
+          leftPath: leftPane.path,
+          rightPath: rightPane.path,
+          direction: request.direction,
+          includeHidden: request.includeHidden,
+          filter: request.filter
+        }),
+      [leftPane.id, rightPane.id]
+    );
+    setFolderSyncOpen(false);
+  }
+
   function addBookmark() {
     if (!activePane) return;
     const exists = bookmarks.some((bookmark) => bookmark.path.toLowerCase() === activePane.path.toLowerCase());
@@ -643,6 +684,9 @@ export default function App() {
           <IconButton title="Paste" onClick={() => void pasteInto()} icon={FileText} disabled={!clipboard?.paths.length} />
           <IconButton title="Delete" onClick={() => void deleteSelected()} icon={Trash2} disabled={!activePane?.selectedPaths.length} />
           <span className="toolbar-divider" />
+          <IconButton title="Batch rename" onClick={() => setBatchRenameOpen(true)} icon={FileText} disabled={!activePane?.selectedPaths.length} />
+          <IconButton title="Folder sync" onClick={() => setFolderSyncOpen(true)} icon={RefreshCcw} disabled={!activePane} />
+          <span className="toolbar-divider" />
           <IconButton title="Refresh" onClick={() => void refreshPane()} icon={RefreshCcw} />
           <IconButton title="Open terminal" onClick={() => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), [])} icon={Terminal} />
           <IconButton title="Add bookmark" onClick={addBookmark} icon={Star} />
@@ -732,6 +776,25 @@ export default function App() {
           onReveal={() => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), [])}
           canPaste={!!clipboard?.paths.length}
           canAct={!!activePane?.selectedPaths.length}
+        />
+      )}
+
+      {batchRenameOpen && activePane && (
+        <BatchRenameModal
+          api={api}
+          paths={activePane.selectedPaths}
+          onClose={() => setBatchRenameOpen(false)}
+          onApply={(rule) => void applyBatchRename(rule)}
+        />
+      )}
+
+      {folderSyncOpen && activePane && (
+        <FolderSyncModal
+          api={api}
+          panes={panes}
+          activePaneId={activePane.id}
+          onClose={() => setFolderSyncOpen(false)}
+          onApply={(request) => void applyFolderSync(request)}
         />
       )}
 
@@ -1134,6 +1197,325 @@ function Inspector({
         </>
       )}
     </aside>
+  );
+}
+
+const defaultBatchRenameRule: BatchRenameRule = {
+  pattern: "{name}-{n}",
+  startNumber: 1,
+  step: 1,
+  padLength: 2,
+  prefix: "",
+  suffix: "",
+  find: "",
+  replace: "",
+  useRegex: false,
+  caseSensitive: false,
+  caseMode: "none",
+  includeExtension: false
+};
+
+function BatchRenameModal({
+  api,
+  paths,
+  onClose,
+  onApply
+}: {
+  api: SpaceApi;
+  paths: string[];
+  onClose: () => void;
+  onApply: (rule: BatchRenameRule) => void;
+}) {
+  const [rule, setRule] = useState<BatchRenameRule>(defaultBatchRenameRule);
+  const [preview, setPreview] = useState<BatchRenamePreview | null>(null);
+  const [error, setError] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setError("");
+    if (!paths.length) {
+      setPreview({ items: [], canApply: false });
+      return;
+    }
+    api
+      .previewBatchRename({ paths, rule })
+      .then((payload) => {
+        if (!cancelled) setPreview(payload);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) setError(getErrorMessage(caught));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, paths, rule]);
+
+  function updateRule<K extends keyof BatchRenameRule>(key: K, value: BatchRenameRule[K]) {
+    setRule((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal rename-modal" role="dialog" aria-modal="true" aria-label="Batch rename">
+        <header className="modal-header">
+          <div>
+            <h2>Batch Rename</h2>
+            <span>{paths.length} selected item(s)</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="rename-form">
+          <label>
+            Format
+            <input value={rule.pattern} onChange={(event) => updateRule("pattern", event.target.value)} />
+          </label>
+          <label>
+            Prefix
+            <input value={rule.prefix} onChange={(event) => updateRule("prefix", event.target.value)} />
+          </label>
+          <label>
+            Suffix
+            <input value={rule.suffix} onChange={(event) => updateRule("suffix", event.target.value)} />
+          </label>
+          <label>
+            Find
+            <input value={rule.find} onChange={(event) => updateRule("find", event.target.value)} />
+          </label>
+          <label>
+            Replace
+            <input value={rule.replace} onChange={(event) => updateRule("replace", event.target.value)} />
+          </label>
+          <label>
+            Case
+            <select value={rule.caseMode} onChange={(event) => updateRule("caseMode", event.target.value as BatchRenameRule["caseMode"])}>
+              <option value="none">Keep</option>
+              <option value="lower">Lower</option>
+              <option value="upper">Upper</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
+          <label>
+            Start
+            <input
+              type="number"
+              value={rule.startNumber}
+              onChange={(event) => updateRule("startNumber", Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Step
+            <input type="number" value={rule.step} onChange={(event) => updateRule("step", Number(event.target.value))} />
+          </label>
+          <label>
+            Padding
+            <input
+              type="number"
+              min={1}
+              max={12}
+              value={rule.padLength}
+              onChange={(event) => updateRule("padLength", Number(event.target.value))}
+            />
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={rule.useRegex}
+              onChange={(event) => updateRule("useRegex", event.target.checked)}
+            />
+            Regex find
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={rule.caseSensitive}
+              onChange={(event) => updateRule("caseSensitive", event.target.checked)}
+            />
+            Case sensitive
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={rule.includeExtension}
+              onChange={(event) => updateRule("includeExtension", event.target.checked)}
+            />
+            Process extension
+          </label>
+        </div>
+
+        <p className="modal-help">Tokens: {"{name}"} original name, {"{ext}"} extension, {"{n}"} sequence, {"{date}"} today.</p>
+        {error && <p className="modal-error">{error}</p>}
+
+        <div className="preview-table">
+          <div className="preview-header">
+            <span>Current</span>
+            <span>New</span>
+            <span>Status</span>
+          </div>
+          {preview?.items.map((item) => (
+            <div key={item.sourcePath} className={`preview-row status-${item.status}`}>
+              <span title={item.sourceName}>{item.sourceName}</span>
+              <span title={item.targetName}>{item.targetName}</span>
+              <span>{item.message ?? item.status}</span>
+            </div>
+          ))}
+        </div>
+
+        <footer className="modal-footer">
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={!preview?.canApply} onClick={() => onApply(rule)}>
+            Rename
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function FolderSyncModal({
+  api,
+  panes,
+  activePaneId,
+  onClose,
+  onApply
+}: {
+  api: SpaceApi;
+  panes: PaneState[];
+  activePaneId: number;
+  onClose: () => void;
+  onApply: (request: {
+    leftPaneId: number;
+    rightPaneId: number;
+    direction: FolderSyncDirection;
+    includeHidden: boolean;
+    filter: string;
+  }) => void;
+}) {
+  const defaultRightPaneId = panes.find((pane) => pane.id !== activePaneId)?.id ?? activePaneId;
+  const [leftPaneId, setLeftPaneId] = useState(activePaneId);
+  const [rightPaneId, setRightPaneId] = useState(defaultRightPaneId);
+  const [direction, setDirection] = useState<FolderSyncDirection>("updateRight");
+  const [includeHidden, setIncludeHidden] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [plan, setPlan] = useState<FolderSyncPlan | null>(null);
+  const [error, setError] = useState("");
+
+  const leftPane = panes.find((pane) => pane.id === leftPaneId);
+  const rightPane = panes.find((pane) => pane.id === rightPaneId);
+  const sameFolder = !!leftPane && !!rightPane && leftPane.path.toLowerCase() === rightPane.path.toLowerCase();
+
+  useEffect(() => {
+    let cancelled = false;
+    setError("");
+    if (!leftPane || !rightPane || sameFolder) {
+      setPlan(null);
+      return;
+    }
+    api
+      .previewFolderSync({
+        leftPath: leftPane.path,
+        rightPath: rightPane.path,
+        direction,
+        includeHidden,
+        filter
+      })
+      .then((payload) => {
+        if (!cancelled) setPlan(payload);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) setError(getErrorMessage(caught));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, direction, filter, includeHidden, leftPane, rightPane, sameFolder]);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal sync-modal" role="dialog" aria-modal="true" aria-label="Folder sync">
+        <header className="modal-header">
+          <div>
+            <h2>Folder Sync</h2>
+            <span>Compare two panes and copy newer or missing files.</span>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </header>
+
+        <div className="sync-form">
+          <label>
+            Left
+            <select value={leftPaneId} onChange={(event) => setLeftPaneId(Number(event.target.value))}>
+              {panes.map((pane) => (
+                <option key={pane.id} value={pane.id}>
+                  P{pane.id} {pathName(pane.path)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Right
+            <select value={rightPaneId} onChange={(event) => setRightPaneId(Number(event.target.value))}>
+              {panes.map((pane) => (
+                <option key={pane.id} value={pane.id}>
+                  P{pane.id} {pathName(pane.path)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Direction
+            <select value={direction} onChange={(event) => setDirection(event.target.value as FolderSyncDirection)}>
+              <option value="updateRight">Update right from left</option>
+              <option value="updateLeft">Update left from right</option>
+              <option value="updateBoth">Update both</option>
+            </select>
+          </label>
+          <label>
+            Filter
+            <input value={filter} placeholder="Optional path text" onChange={(event) => setFilter(event.target.value)} />
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={includeHidden} onChange={(event) => setIncludeHidden(event.target.checked)} />
+            Include hidden items
+          </label>
+        </div>
+
+        {sameFolder && <p className="modal-error">Choose two different folders.</p>}
+        {error && <p className="modal-error">{error}</p>}
+
+        <div className="sync-summary">
+          <span>{plan?.actions.length ?? 0} action(s)</span>
+          <span>{plan?.skipped ?? 0} skipped</span>
+        </div>
+
+        <div className="preview-table">
+          <div className="preview-header sync-header">
+            <span>Action</span>
+            <span>Path</span>
+            <span>Reason</span>
+          </div>
+          {plan?.actions.slice(0, 200).map((action) => (
+            <div key={`${action.type}-${action.relativePath}`} className="preview-row sync-row">
+              <span>{action.type === "copyLeftToRight" ? "Left -> Right" : "Right -> Left"}</span>
+              <span title={action.relativePath}>{action.relativePath}</span>
+              <span>{action.reason}, {formatBytes(action.size)}</span>
+            </div>
+          ))}
+          {plan && plan.actions.length > 200 && <p className="modal-help">Showing first 200 actions.</p>}
+        </div>
+
+        <footer className="modal-footer">
+          <button onClick={onClose}>Cancel</button>
+          <button
+            className="primary"
+            disabled={!plan || plan.actions.length === 0 || sameFolder}
+            onClick={() => onApply({ leftPaneId, rightPaneId, direction, includeHidden, filter })}
+          >
+            Sync
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

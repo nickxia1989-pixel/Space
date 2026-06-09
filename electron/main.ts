@@ -7,10 +7,14 @@ import {
   createFile,
   createFolder,
   deleteItems,
+  applyBatchRename,
+  applyFolderSync,
   getBootstrap,
   listDirectory,
   moveItems,
   openTerminal,
+  previewBatchRename,
+  previewFolderSync,
   previewPath,
   renameItem,
   searchFiles
@@ -18,8 +22,10 @@ import {
 import { WorkspaceStore } from "./workspaceStore.js";
 import type {
   CreateItemRequest,
+  BatchRenameRequest,
   DeleteRequest,
   FileOperationRequest,
+  FolderSyncRequest,
   HashRequest,
   RenameRequest,
   SearchOptions,
@@ -79,6 +85,10 @@ function registerIpc(): void {
   ipcMain.handle("space:move-items", (_event, request: FileOperationRequest) => moveItems(request));
   ipcMain.handle("space:preview", (_event, targetPath: string) => previewPath(targetPath));
   ipcMain.handle("space:calculate-hash", (_event, request: HashRequest) => calculateHash(request));
+  ipcMain.handle("space:preview-batch-rename", (_event, request: BatchRenameRequest) => previewBatchRename(request));
+  ipcMain.handle("space:apply-batch-rename", (_event, request: BatchRenameRequest) => applyBatchRename(request));
+  ipcMain.handle("space:preview-folder-sync", (_event, request: FolderSyncRequest) => previewFolderSync(request));
+  ipcMain.handle("space:apply-folder-sync", (_event, request: FolderSyncRequest) => applyFolderSync(request));
   ipcMain.handle("space:open-path", async (_event, targetPath: string) => {
     const error = await shell.openPath(targetPath);
     return error ? { ok: false, message: error } : { ok: true, message: "Opened.", affectedPaths: [targetPath] };

@@ -1,10 +1,14 @@
 import type {
   BootstrapPayload,
+  BatchRenamePreview,
+  BatchRenameRequest,
   CreateItemRequest,
   DeleteRequest,
   DirectoryPayload,
   FileEntry,
   FileOperationRequest,
+  FolderSyncPlan,
+  FolderSyncRequest,
   HashPayload,
   HashRequest,
   KnownLocation,
@@ -161,6 +165,45 @@ function createBrowserMockApi(): SpaceApi {
     },
     async calculateHash(request: HashRequest): Promise<HashPayload> {
       return { path: request.path, algorithm: request.algorithm, value: "mock-hash-value" };
+    },
+    async previewBatchRename(request: BatchRenameRequest): Promise<BatchRenamePreview> {
+      const items = request.paths.map((sourcePath, index) => {
+        const sourceName = pathName(sourcePath);
+        const targetName = `${String(request.rule.startNumber + index).padStart(request.rule.padLength, "0")}-${sourceName}`;
+        const parent = parentPath(sourcePath);
+        return {
+          sourcePath,
+          targetPath: `${parent}\\${targetName}`,
+          sourceName,
+          targetName,
+          status: "ready" as const
+        };
+      });
+      return { items, canApply: items.length > 0 };
+    },
+    async applyBatchRename(request: BatchRenameRequest) {
+      return mockResult(`Renamed ${request.paths.length} item(s).`, request.paths);
+    },
+    async previewFolderSync(request: FolderSyncRequest): Promise<FolderSyncPlan> {
+      return {
+        leftPath: request.leftPath,
+        rightPath: request.rightPath,
+        actions: [
+          {
+            type: "copyLeftToRight",
+            relativePath: "Mock Sync.txt",
+            sourcePath: `${request.leftPath}\\Mock Sync.txt`,
+            destinationPath: `${request.rightPath}\\Mock Sync.txt`,
+            reason: "missing",
+            size: 1200,
+            modifiedAt: Date.now()
+          }
+        ],
+        skipped: 0
+      };
+    },
+    async applyFolderSync(request: FolderSyncRequest) {
+      return mockResult(`Synchronized ${request.leftPath} with ${request.rightPath}.`, [request.leftPath, request.rightPath]);
     },
     async openPath(path: string) {
       return mockResult(`Opened ${path}.`, [path]);

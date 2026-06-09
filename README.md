@@ -13,6 +13,8 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Search/filter: instant pane filtering and recursive search with bounded results.
 - Workspace persistence: pane paths, histories, layout, active pane, and bookmarks are restored between launches.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
+- Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, and apply.
+- Folder sync: compare two panes, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, and execute the sync.
 - Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+R, Alt+Up, Delete, F2, and Enter.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
 
@@ -41,4 +43,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. QSpace advanced extension areas such as FTP/SFTP/cloud drives, archive browsing, batch rename presets, folder sync, file color rules, and fully customizable toolbars/context menus are not implemented yet.
+The current implementation focuses on the local Windows filesystem. QSpace advanced extension areas such as FTP/SFTP/cloud drives, archive browsing, saved batch rename presets, scheduled/automatic folder sync presets, file color rules, and fully customizable toolbars/context menus are not implemented yet.

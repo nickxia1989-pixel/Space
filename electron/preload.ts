@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   CreateItemRequest,
+  BatchRenameRequest,
   DeleteRequest,
   FileOperationRequest,
+  FolderSyncRequest,
   HashRequest,
   RenameRequest,
   SearchOptions,
@@ -22,6 +24,10 @@ const api: SpaceApi = {
   moveItems: (request: FileOperationRequest) => ipcRenderer.invoke("space:move-items", request),
   preview: (path: string) => ipcRenderer.invoke("space:preview", path),
   calculateHash: (request: HashRequest) => ipcRenderer.invoke("space:calculate-hash", request),
+  previewBatchRename: (request: BatchRenameRequest) => ipcRenderer.invoke("space:preview-batch-rename", request),
+  applyBatchRename: (request: BatchRenameRequest) => ipcRenderer.invoke("space:apply-batch-rename", request),
+  previewFolderSync: (request: FolderSyncRequest) => ipcRenderer.invoke("space:preview-folder-sync", request),
+  applyFolderSync: (request: FolderSyncRequest) => ipcRenderer.invoke("space:apply-folder-sync", request),
   openPath: (path: string) => ipcRenderer.invoke("space:open-path", path),
   revealPath: (path: string) => ipcRenderer.invoke("space:reveal-path", path),
   openTerminal: (path: string) => ipcRenderer.invoke("space:open-terminal", path),

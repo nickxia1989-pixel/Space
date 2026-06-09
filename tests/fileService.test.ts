@@ -9,8 +9,12 @@ import {
   createFile,
   createFolder,
   deleteItems,
+  applyBatchRename,
+  applyFolderSync,
   listDirectory,
   moveItems,
+  previewBatchRename,
+  previewFolderSync,
   previewPath,
   renameItem,
   searchFiles
@@ -84,4 +88,148 @@ describe("fileService", () => {
     await expect(fs.access(file.path)).resolves.toBeUndefined();
     await expect(fs.access(path.join(tempRoot, "same-place copy.txt"))).rejects.toThrow();
   });
+
+  it("previews and applies batch rename rules with sequence tokens", async () => {
+    const first = await createFile({ parentPath: tempRoot, name: "alpha.txt" });
+    const second = await createFile({ parentPath: tempRoot, name: "beta.txt" });
+    const rule = {
+      pattern: "asset-{n}-{name}",
+      startNumber: 3,
+      step: 2,
+      padLength: 3,
+      prefix: "",
+      suffix: "",
+      find: "",
+      replace: "",
+      useRegex: false,
+      caseSensitive: false,
+      caseMode: "upper" as const,
+      includeExtension: false
+    };
+
+    const preview = await previewBatchRename({ paths: [first.path, second.path], rule });
+    expect(preview.canApply).toBe(true);
+    expect(preview.items.map((item) => item.targetName)).toEqual(["asset-003-ALPHA.txt", "asset-005-BETA.txt"]);
+
+    const result = await applyBatchRename({ paths: [first.path, second.path], rule });
+    expect(result.affectedPaths?.map((targetPath) => path.basename(targetPath))).toEqual([
+      "asset-003-ALPHA.txt",
+      "asset-005-BETA.txt"
+    ]);
+    await expect(fs.access(path.join(tempRoot, "asset-003-ALPHA.txt"))).resolves.toBeUndefined();
+  });
+
+  it("blocks batch rename conflicts before applying changes", async () => {
+    const first = await createFile({ parentPath: tempRoot, name: "one.txt" });
+    const second = await createFile({ parentPath: tempRoot, name: "two.txt" });
+    const preview = await previewBatchRename({
+      paths: [first.path, second.path],
+      rule: {
+        pattern: "same",
+        startNumber: 1,
+        step: 1,
+        padLength: 2,
+        prefix: "",
+        suffix: "",
+        find: "",
+        replace: "",
+        useRegex: false,
+        caseSensitive: false,
+        caseMode: "none",
+        includeExtension: false
+      }
+    });
+
+    expect(preview.canApply).toBe(false);
+    expect(preview.items.every((item) => item.status === "conflict")).toBe(true);
+    await expect(fs.access(first.path)).resolves.toBeUndefined();
+    await expect(fs.access(second.path)).resolves.toBeUndefined();
+  });
+
+  it("allows batch rename previews with unchanged items and applies only changed items", async () => {
+    const unchanged = await createFile({ parentPath: tempRoot, name: "keep.txt" });
+    const changed = await createFile({ parentPath: tempRoot, name: "rename.md" });
+    const preview = await previewBatchRename({
+      paths: [unchanged.path, changed.path],
+      rule: {
+        pattern: "{name}",
+        startNumber: 1,
+        step: 1,
+        padLength: 2,
+        prefix: "",
+        suffix: "",
+        find: "rename",
+        replace: "renamed",
+        useRegex: false,
+        caseSensitive: false,
+        caseMode: "none",
+        includeExtension: false
+      }
+    });
+
+    expect(preview.canApply).toBe(true);
+    expect(preview.items.map((item) => item.status)).toEqual(["unchanged", "ready"]);
+    const result = await applyBatchRename({ paths: [unchanged.path, changed.path], rule: previewRuleFromTest() });
+    expect(result.affectedPaths?.map((targetPath) => path.basename(targetPath))).toEqual(["renamed.md"]);
+    await expect(fs.access(unchanged.path)).resolves.toBeUndefined();
+  });
+
+  it("previews and applies one-way folder sync for missing and newer files", async () => {
+    const left = await createFolder({ parentPath: tempRoot, name: "Left" });
+    const right = await createFolder({ parentPath: tempRoot, name: "Right" });
+    const leftNew = path.join(left.path, "new.txt");
+    const leftShared = path.join(left.path, "shared.txt");
+    const rightShared = path.join(right.path, "shared.txt");
+    await fs.writeFile(leftNew, "new file", "utf8");
+    await fs.writeFile(leftShared, "newer", "utf8");
+    await fs.writeFile(rightShared, "older", "utf8");
+    const oldDate = new Date(Date.now() - 60_000);
+    const newDate = new Date(Date.now());
+    await fs.utimes(rightShared, oldDate, oldDate);
+    await fs.utimes(leftShared, newDate, newDate);
+
+    const request = {
+      leftPath: left.path,
+      rightPath: right.path,
+      direction: "updateRight" as const,
+      includeHidden: false,
+      filter: ""
+    };
+    const plan = await previewFolderSync(request);
+    expect(plan.actions.map((action) => action.relativePath).sort()).toEqual(["new.txt", "shared.txt"]);
+
+    const result = await applyFolderSync(request);
+    expect(result.affectedPaths).toHaveLength(2);
+    await expect(fs.readFile(path.join(right.path, "new.txt"), "utf8")).resolves.toBe("new file");
+    await expect(fs.readFile(rightShared, "utf8")).resolves.toBe("newer");
+  });
+
+  it("rejects folder sync when both sides point to the same directory", async () => {
+    await expect(
+      previewFolderSync({
+        leftPath: tempRoot,
+        rightPath: tempRoot,
+        direction: "updateBoth",
+        includeHidden: false,
+        filter: ""
+      })
+    ).rejects.toThrow("Choose two different folders");
+  });
 });
+
+function previewRuleFromTest() {
+  return {
+    pattern: "{name}",
+    startNumber: 1,
+    step: 1,
+    padLength: 2,
+    prefix: "",
+    suffix: "",
+    find: "rename",
+    replace: "renamed",
+    useRegex: false,
+    caseSensitive: false,
+    caseMode: "none" as const,
+    includeExtension: false
+  };
+}
