@@ -393,20 +393,29 @@ describe("App", () => {
     const dialog = screen.getByRole("dialog", { name: "Customize actions" });
     const toolbarGroup = within(dialog).getByRole("group", { name: "Toolbar" });
     await user.click(within(toolbarGroup).getByLabelText("Delete"));
-    await user.click(within(dialog).getByRole("button", { name: "Save Layout" }));
+    fireEvent.change(within(dialog).getByLabelText("Workspace Search hotkey"), { target: { value: "ctrl+alt+w" } });
+    await user.click(within(dialog).getByRole("button", { name: "Save Settings" }));
 
     expect(screen.queryByLabelText("Delete")).not.toBeInTheDocument();
     await waitFor(() => {
-      const toolbarIds = readSavedWorkspace()?.workspaces[0]?.toolbarActionIds;
+      const workspace = readSavedWorkspace()?.workspaces[0];
+      const toolbarIds = workspace?.toolbarActionIds;
       expect(toolbarIds).toBeDefined();
       expect(toolbarIds).not.toContain("delete");
+      expect(workspace?.hotkeyBindings).toContainEqual({ actionId: "workspaceSearch", shortcut: "Ctrl+Alt+W" });
     });
+
+    const shell = screen.getByText("Four-pane file manager").closest("main");
+    expect(shell).not.toBeNull();
+    fireEvent.keyDown(shell!, { key: "w", ctrlKey: true, altKey: true });
+    expect(screen.getByRole("dialog", { name: "Workspace search" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
 
     await user.click(screen.getByLabelText("Customize actions"));
     const secondDialog = screen.getByRole("dialog", { name: "Customize actions" });
     const contextGroup = within(secondDialog).getByRole("group", { name: "Context Menu" });
     await user.click(within(contextGroup).getByLabelText("Delete"));
-    await user.click(within(secondDialog).getByRole("button", { name: "Save Layout" }));
+    await user.click(within(secondDialog).getByRole("button", { name: "Save Settings" }));
     await waitFor(() => {
       const contextMenuIds = readSavedWorkspace()?.workspaces[0]?.contextMenuActionIds;
       expect(contextMenuIds).toBeDefined();

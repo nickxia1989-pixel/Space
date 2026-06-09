@@ -13,7 +13,7 @@
 | New File Templates | `tests/fileService.test.ts` template content/date variables; `tests/App.test.tsx` template modal create flow |
 | Color Rules | `tests/App.test.tsx` rule creation and highlighted entry coverage; browser DOM style check |
 | Quick Launch | `tests/fileService.test.ts` variable/argument construction; `tests/App.test.tsx` panel run/settings coverage |
-| Custom toolbar/context menu | `tests/App.test.tsx` action visibility and context menu customization coverage |
+| Custom toolbar/context menu/hotkeys | `tests/App.test.tsx` action visibility, context menu customization, and hotkey trigger coverage |
 | Cross-pane transfer commands | Renderer controls and IPC APIs in `src/App.tsx` and `electron/fileService.ts` |
 | Search/filter | Renderer tests and browser interaction check |
 | Workspace Search | `tests/App.test.tsx` workspace search modal coverage with de-duplicated mock results and Stash Shelf action |
@@ -64,8 +64,8 @@ Expected result: all commands exit with code `0`.
 18. Select files/folders and use Create ZIP Archive, then double-click the resulting `.zip`, preview entries, extract selected entries, and extract all. Also double-click existing `.tar`, `.tgz`, or `.tar.gz` archives and verify browsing, text/image preview, selected extraction, and extract-all.
 19. Open Color Rules, add a rule for `.zip` files, save it, and confirm matching entries are highlighted in details view and icon view without changing selection behavior.
 20. Open Quick Launch, run the default PowerShell item from a pane, add a custom command/app/shortcut item, use `{currentPath}` and `{selectedPaths}`, save, and confirm it appears in the Quick Launch panel.
-21. Open Customize Actions, hide and reorder toolbar actions, save, and verify the toolbar updates; customize the Context Menu and verify right-click actions follow the saved layout.
-22. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, batch rename presets/history, folder sync presets, and action layout are restored.
+21. Open Customize Actions, hide and reorder toolbar actions, assign a hotkey to Workspace Search, save, and verify the toolbar updates and the hotkey opens Workspace Search; customize the Context Menu and verify right-click actions follow the saved layout.
+22. Restart the app and confirm workspace tabs, pane locations, layout, active pane, bookmarks, Stash Shelf items, saved file templates, saved color rules, saved Quick Launch items, batch rename presets/history, folder sync presets, action layout, and custom hotkeys are restored.
 23. Run `npm run package:win`, start `release/win-unpacked/Space.exe`, and confirm the packaged app opens without relying on the dev server.
 24. Run `npm run dist:win`, confirm `Space-0.1.0-x64-setup.exe` and `Space-0.1.0-x64-portable.exe` are both created, launch the portable exe, and do one smoke pass from an installed copy.
 
@@ -88,7 +88,7 @@ Open `http://127.0.0.1:5188/` and verify:
 - The Quick Launch panel runs the default item through the browser mock and opens the settings panel.
 - The Batch Rename panel can save a preset, load it back from the preset selector, delete it, record a successful rename in history, and clear history.
 - The Folder Sync panel can save a preset, load it back from the preset selector, and delete it.
-- The Customize Actions panel can hide a toolbar action and remove a context-menu action.
+- The Customize Actions panel can hide a toolbar action, remove a context-menu action, assign `Ctrl+Alt+W` to Workspace Search, and trigger that hotkey from the main shell.
 - Filtering `Space` in pane 1 reduces the mock result set.
 - Workspace Search for `Archive` returns `Archive.zip` and `Archive.tar`, and Shelf adds one result without duplicating repeated pane roots.
 - Selecting `Archive.zip` and `Archive.tar`, then running Hash Compare, shows one matching mock hash group.

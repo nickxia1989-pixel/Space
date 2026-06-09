@@ -100,6 +100,11 @@ export interface QuickLaunchItem {
   createdAt: number;
 }
 
+export interface HotkeyBinding {
+  actionId: string;
+  shortcut: string;
+}
+
 export interface BootstrapPayload {
   homePath: string;
   knownLocations: KnownLocation[];
@@ -141,6 +146,7 @@ export interface WorkspaceSnapshot {
   folderSyncPresets?: FolderSyncPreset[];
   toolbarActionIds?: string[];
   contextMenuActionIds?: string[];
+  hotkeyBindings?: HotkeyBinding[];
   actionLayoutVersion?: number;
   savedAt: number;
 }

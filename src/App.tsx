@@ -75,6 +75,7 @@ import type {
   FolderSyncDirection,
   FolderSyncPlan,
   FolderSyncPreset,
+  HotkeyBinding,
   SortDirection,
   SortKey,
   SpaceApi,
@@ -248,6 +249,10 @@ const contextMenuActionCatalog = [
   { id: "quickLaunch", label: "Quick Launch" },
   { id: "terminal", label: "Open Terminal" },
   { id: "reveal", label: "Reveal In Explorer" }
+];
+const hotkeyActionCatalog = [
+  ...toolbarActionCatalog,
+  ...contextMenuActionCatalog.filter((item) => !toolbarActionCatalog.some((toolbarItem) => toolbarItem.id === item.id))
 ];
 
 type ActionCatalogItem = { id: string; label: string };
@@ -510,6 +515,84 @@ function normalizeActionIds(
   return normalized;
 }
 
+function normalizeShortcut(value: string): string {
+  const parts = value
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "";
+  const modifiers = new Set<string>();
+  let key = "";
+  for (const rawPart of parts) {
+    const part = rawPart.toLowerCase();
+    if (part === "ctrl" || part === "control") {
+      modifiers.add("Ctrl");
+    } else if (part === "alt" || part === "option") {
+      modifiers.add("Alt");
+    } else if (part === "shift") {
+      modifiers.add("Shift");
+    } else if (part === "meta" || part === "cmd" || part === "command" || part === "win" || part === "windows") {
+      modifiers.add("Meta");
+    } else {
+      key = normalizeShortcutKey(rawPart);
+    }
+  }
+  if (!key) return "";
+  return [...["Ctrl", "Alt", "Shift", "Meta"].filter((modifier) => modifiers.has(modifier)), key].join("+");
+}
+
+function normalizeShortcutKey(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  const aliases: Record<string, string> = {
+    esc: "Escape",
+    return: "Enter",
+    del: "Delete",
+    spacebar: "Space",
+    space: "Space",
+    pgup: "PageUp",
+    pgdn: "PageDown",
+    up: "ArrowUp",
+    down: "ArrowDown",
+    left: "ArrowLeft",
+    right: "ArrowRight"
+  };
+  if (aliases[lower]) return aliases[lower];
+  if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(trimmed)) return trimmed.toUpperCase();
+  if (/^[a-z0-9]$/i.test(trimmed)) return trimmed.toUpperCase();
+  return trimmed.length > 1 ? trimmed[0].toUpperCase() + trimmed.slice(1) : trimmed.toUpperCase();
+}
+
+function shortcutFromKeyboardEvent(event: React.KeyboardEvent): string {
+  const key = normalizeShortcutKey(event.key);
+  if (!key || ["Control", "Shift", "Alt", "Meta"].includes(key)) return "";
+  return [
+    event.ctrlKey ? "Ctrl" : "",
+    event.altKey ? "Alt" : "",
+    event.shiftKey ? "Shift" : "",
+    event.metaKey ? "Meta" : "",
+    key
+  ]
+    .filter(Boolean)
+    .join("+");
+}
+
+function normalizeHotkeyBindings(input: HotkeyBinding[] | undefined, catalog: ActionCatalogItem[] = hotkeyActionCatalog): HotkeyBinding[] {
+  if (!Array.isArray(input)) return [];
+  const validIds = new Set(catalog.map((item) => item.id));
+  const seen = new Set<string>();
+  const normalized: HotkeyBinding[] = [];
+  for (const binding of input) {
+    if (!binding || !validIds.has(binding.actionId) || typeof binding.shortcut !== "string") continue;
+    const shortcut = normalizeShortcut(binding.shortcut);
+    if (!shortcut || seen.has(shortcut)) continue;
+    seen.add(shortcut);
+    normalized.push({ actionId: binding.actionId, shortcut });
+  }
+  return normalized;
+}
+
 function defaultPaneSnapshot(id: number, filePath: string): WorkspacePaneSnapshot {
   return {
     id,
@@ -584,6 +667,7 @@ function createDefaultWorkspaceSnapshot(bootstrap: BootstrapPayload): WorkspaceS
     folderSyncPresets: [],
     toolbarActionIds: defaultToolbarActionIds,
     contextMenuActionIds: defaultContextMenuActionIds,
+    hotkeyBindings: [],
     actionLayoutVersion: currentActionLayoutVersion,
     savedAt: Date.now()
   };
@@ -606,6 +690,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
     batchRenamePresets: normalizeBatchRenamePresets(record.batchRenamePresets),
     batchRenameHistory: normalizeBatchRenameHistory(record.batchRenameHistory),
     folderSyncPresets: normalizeFolderSyncPresets(record.folderSyncPresets),
+    hotkeyBindings: normalizeHotkeyBindings(record.hotkeyBindings),
     toolbarActionIds: normalizeActionIds(
       record.toolbarActionIds,
       defaultToolbarActionIds,
@@ -699,6 +784,7 @@ export default function App() {
   const [folderSyncPresets, setFolderSyncPresets] = useState<FolderSyncPreset[]>([]);
   const [toolbarActionIds, setToolbarActionIds] = useState<string[]>(defaultToolbarActionIds);
   const [contextMenuActionIds, setContextMenuActionIds] = useState<string[]>(defaultContextMenuActionIds);
+  const [hotkeyBindings, setHotkeyBindings] = useState<HotkeyBinding[]>([]);
   const [addressSuggestions, setAddressSuggestions] = useState<Record<number, PathSuggestion[]>>({});
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
@@ -753,6 +839,7 @@ export default function App() {
         setFolderSyncPresets(workspace.folderSyncPresets ?? []);
         setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
         setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
+        setHotkeyBindings(workspace.hotkeyBindings ?? []);
         setPanes(hydrated);
 
         const loaded = await Promise.all(
@@ -810,6 +897,7 @@ export default function App() {
         folderSyncPresets,
         toolbarActionIds,
         contextMenuActionIds,
+        hotkeyBindings,
         actionLayoutVersion: currentActionLayoutVersion,
         savedAt: Date.now()
       };
@@ -817,7 +905,7 @@ export default function App() {
       if (workspaceDocument) void api.saveWorkspace(workspaceDocument);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activePaneId, activeWorkspaceId, api, batchRenameHistory, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, folderSyncPresets, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
+  }, [activePaneId, activeWorkspaceId, api, batchRenameHistory, batchRenamePresets, bookmarks, colorRules, contextMenuActionIds, fileTemplates, folderSyncPresets, hotkeyBindings, initialized, layout, panes, quickLaunchItems, stashItems, toolbarActionIds, workspaces]);
 
   useEffect(() => {
     if (!toast) return;
@@ -857,6 +945,7 @@ export default function App() {
       folderSyncPresets,
       toolbarActionIds,
       contextMenuActionIds,
+      hotkeyBindings,
       actionLayoutVersion: currentActionLayoutVersion,
       savedAt: Date.now()
     };
@@ -931,6 +1020,7 @@ export default function App() {
     setFolderSyncPresets(workspace.folderSyncPresets ?? []);
     setToolbarActionIds(workspace.toolbarActionIds ?? defaultToolbarActionIds);
     setContextMenuActionIds(workspace.contextMenuActionIds ?? defaultContextMenuActionIds);
+    setHotkeyBindings(workspace.hotkeyBindings ?? []);
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
@@ -1537,6 +1627,12 @@ export default function App() {
 
     if (isFormElement(event.target)) return;
 
+    const customActionId = hotkeyBindings.find((binding) => binding.shortcut === shortcutFromKeyboardEvent(event))?.actionId;
+    if (customActionId && triggerToolbarAction(customActionId)) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.ctrlKey && event.key.toLowerCase() === "a") {
       event.preventDefault();
       selectAll();
@@ -1609,6 +1705,22 @@ export default function App() {
     terminal: { title: "Open terminal", icon: Terminal, onClick: () => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), []) },
     bookmark: { title: "Add bookmark", icon: Star, onClick: addBookmark }
   };
+
+  function triggerToolbarAction(actionId: string): boolean {
+    const triggerActions: Record<string, { onClick: () => void; disabled?: boolean }> = {
+      ...toolbarActions,
+      rename: { onClick: () => void renameSelected(), disabled: !activePane || activePane.selectedPaths.length !== 1 },
+      hash: { onClick: () => void calculateSelectedHash("sha256"), disabled: !activePane || activePane.selectedPaths.length !== 1 },
+      reveal: {
+        onClick: () => activePane?.selectedPaths[0] && void perform("Reveal", () => api.revealPath(activePane.selectedPaths[0]), []),
+        disabled: !activePane?.selectedPaths.length
+      }
+    };
+    const action = triggerActions[actionId];
+    if (!action || action.disabled) return false;
+    action.onClick();
+    return true;
+  }
 
   if (!bootstrap || panes.length !== 4) {
     return (
@@ -1831,19 +1943,22 @@ export default function App() {
         <ActionSettingsModal
           toolbarIds={toolbarActionIds}
           contextMenuIds={contextMenuActionIds}
+          hotkeyBindings={hotkeyBindings}
           onClose={() => setActionSettingsOpen(false)}
-          onSave={(nextToolbarIds, nextContextMenuIds) => {
+          onSave={(nextToolbarIds, nextContextMenuIds, nextHotkeyBindings) => {
             const nextSnapshot: WorkspaceSnapshot = {
               ...getCurrentWorkspaceSnapshot(),
               toolbarActionIds: nextToolbarIds,
               contextMenuActionIds: nextContextMenuIds,
+              hotkeyBindings: nextHotkeyBindings,
               savedAt: Date.now()
             };
             setToolbarActionIds(nextToolbarIds);
             setContextMenuActionIds(nextContextMenuIds);
+            setHotkeyBindings(nextHotkeyBindings);
             persistCurrentWorkspaceSnapshot(nextSnapshot);
             setActionSettingsOpen(false);
-            showToast("success", "Action layout saved.");
+            showToast("success", "Action settings saved.");
           }}
         />
       )}
@@ -3530,16 +3645,32 @@ function ColorRulesModal({
 function ActionSettingsModal({
   toolbarIds,
   contextMenuIds,
+  hotkeyBindings,
   onClose,
   onSave
 }: {
   toolbarIds: string[];
   contextMenuIds: string[];
+  hotkeyBindings: HotkeyBinding[];
   onClose: () => void;
-  onSave: (toolbarIds: string[], contextMenuIds: string[]) => void;
+  onSave: (toolbarIds: string[], contextMenuIds: string[], hotkeyBindings: HotkeyBinding[]) => void;
 }) {
   const [draftToolbarIds, setDraftToolbarIds] = useState(() => normalizeActionIds(toolbarIds, defaultToolbarActionIds, toolbarActionCatalog));
   const [draftContextIds, setDraftContextIds] = useState(() => normalizeActionIds(contextMenuIds, defaultContextMenuActionIds, contextMenuActionCatalog));
+  const [draftHotkeys, setDraftHotkeys] = useState<Record<string, string>>(() => {
+    const entries = normalizeHotkeyBindings(hotkeyBindings).map((binding) => [binding.actionId, binding.shortcut]);
+    return Object.fromEntries(entries);
+  });
+  const normalizedHotkeys = hotkeyActionCatalog
+    .map((item) => ({ actionId: item.id, shortcut: normalizeShortcut(draftHotkeys[item.id] ?? "") }))
+    .filter((binding) => binding.shortcut);
+  const duplicateHotkeys = normalizedHotkeys
+    .filter((binding, index, list) => list.findIndex((item) => item.shortcut === binding.shortcut) !== index)
+    .map((binding) => binding.shortcut);
+  const invalidHotkeys = hotkeyActionCatalog
+    .filter((item) => (draftHotkeys[item.id] ?? "").trim() && !normalizeShortcut(draftHotkeys[item.id] ?? ""))
+    .map((item) => item.label);
+  const canSave = duplicateHotkeys.length === 0 && invalidHotkeys.length === 0;
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3565,24 +3696,67 @@ function ActionSettingsModal({
             selectedIds={draftContextIds}
             onChange={setDraftContextIds}
           />
+          <HotkeyEditor catalog={hotkeyActionCatalog} values={draftHotkeys} onChange={setDraftHotkeys} />
         </div>
+        {(duplicateHotkeys.length > 0 || invalidHotkeys.length > 0) && (
+          <div className="action-settings-warning" role="alert">
+            {duplicateHotkeys.length > 0 && <span>Duplicate shortcuts: {[...new Set(duplicateHotkeys)].join(", ")}</span>}
+            {invalidHotkeys.length > 0 && <span>Invalid shortcuts: {invalidHotkeys.join(", ")}</span>}
+          </div>
+        )}
 
         <footer className="modal-footer">
           <button
             onClick={() => {
               setDraftToolbarIds(defaultToolbarActionIds);
               setDraftContextIds(defaultContextMenuActionIds);
+              setDraftHotkeys({});
             }}
           >
             Restore Defaults
           </button>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => onSave(draftToolbarIds, draftContextIds)}>
-            Save Layout
+          <button className="primary" disabled={!canSave} onClick={() => onSave(draftToolbarIds, draftContextIds, normalizeHotkeyBindings(normalizedHotkeys))}>
+            Save Settings
           </button>
         </footer>
       </section>
     </div>
+  );
+}
+
+function HotkeyEditor({
+  catalog,
+  values,
+  onChange
+}: {
+  catalog: ActionCatalogItem[];
+  values: Record<string, string>;
+  onChange: (values: Record<string, string>) => void;
+}) {
+  return (
+    <fieldset className="hotkey-editor">
+      <legend>Hotkeys</legend>
+      {catalog.map((item) => {
+        const value = values[item.id] ?? "";
+        const normalized = normalizeShortcut(value);
+        return (
+          <label key={item.id} className="hotkey-row">
+            <span>{item.label}</span>
+            <input
+              aria-label={`${item.label} hotkey`}
+              value={value}
+              placeholder="Ctrl+Alt+K"
+              onChange={(event) => onChange({ ...values, [item.id]: event.target.value })}
+              onBlur={() => {
+                if (normalized || !value.trim()) onChange({ ...values, [item.id]: normalized });
+              }}
+              spellCheck={false}
+            />
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 

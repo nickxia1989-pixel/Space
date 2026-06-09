@@ -17,7 +17,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - New File Templates: create files from built-in or workspace-saved templates, edit template content, and use `$date(...)` variables in names or content.
 - Color Rules: per-workspace rules highlight matching files/folders by type, name operator, extension, size, modified age, and created age with custom text/background colors.
 - Quick Launch: per-workspace launch items run apps, command lines, or shortcuts from the active pane with variables for current path and selected files.
-- Custom Actions: per-workspace toolbar and context menu actions can be shown, hidden, reordered, and restored to defaults.
+- Custom Actions: per-workspace toolbar actions, context menu actions, and action hotkeys can be shown, hidden, reordered, assigned, and restored to defaults.
 - Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
 - Hash Compare: calculate MD5, SHA-1, SHA-256, or SHA-512 for selected files and group matching hashes to verify duplicates or copied files.
 - Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, reusable workspace presets, apply, and per-workspace rename history.
@@ -25,7 +25,7 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
 - Stash Shelf: collect files or folders from any pane, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
 - ZIP/TAR/TGZ archive tools: double-click supported archives to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
-- Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+Shift+C for full paths, Ctrl+R, Alt+Up, Delete, F2, and Enter.
+- Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+Shift+C for full paths, Ctrl+R, Alt+Up, Delete, F2, Enter, and user-assigned per-workspace action hotkeys.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
 
 ## Commands
@@ -62,4 +62,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. ZIP, TAR, TGZ, and TAR.GZ archives are supported for browsing and extraction; other archive formats such as 7z/rar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, media-dimension color rules, global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP, TAR, TGZ, and TAR.GZ archives are supported for browsing and extraction; other archive formats such as 7z/rar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, media-dimension color rules, system-wide global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.
