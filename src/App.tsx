@@ -780,6 +780,15 @@ function visibleEntries(pane: PaneState): FileEntry[] {
   return sortEntries(filtered, pane.sortKey, pane.sortDirection);
 }
 
+function retainExistingSelection(selectedPaths: string[], anchorPath: string | undefined, entries: FileEntry[]) {
+  const entryPaths = new Set(entries.map((entry) => entry.path.toLowerCase()));
+  const retainedSelection = selectedPaths.filter((selectedPath) => entryPaths.has(selectedPath.toLowerCase()));
+  return {
+    selectedPaths: retainedSelection,
+    anchorPath: anchorPath && entryPaths.has(anchorPath.toLowerCase()) ? anchorPath : retainedSelection[0]
+  };
+}
+
 function typeSelectionKey(entry: FileEntry): string {
   if (entry.isDirectory) return "directory";
   return `file:${entry.extension || entry.typeLabel || "file"}`.toLowerCase();
@@ -1230,13 +1239,14 @@ export default function App() {
           history = [...pane.history];
           history[historyIndex] = payload.path;
         }
+        const retained = mode === "replace" ? retainExistingSelection(pane.selectedPaths, pane.anchorPath, payload.entries) : null;
         return {
           ...pane,
           path: payload.path,
           addressDraft: payload.path,
           entries: payload.entries,
-          selectedPaths: [],
-          anchorPath: undefined,
+          selectedPaths: retained?.selectedPaths ?? [],
+          anchorPath: retained?.anchorPath,
           loading: false,
           error: undefined,
           history,

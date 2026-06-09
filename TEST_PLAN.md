@@ -10,7 +10,7 @@
 | Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot; path suggestion tests; `tests/App.test.tsx` guards out-of-order pane navigation responses |
 | Local file operations | `tests/fileService.test.ts` temp-directory lifecycle, collision-safe copies, blocked self/child folder copies, and Windows-invalid filename rejection; `tests/App.test.tsx` verifies same-folder pane refresh, deleted/moved/renamed-folder pane recovery, and background refresh focus retention |
 | Browser mock filesystem | `tests/browserMockApi.test.ts` directory tree rename/delete behavior, rename conflict parity, and Windows-invalid filename rejection |
-| Selection and path utilities | `tests/App.test.tsx` copy-path and select-same-type coverage |
+| Selection and path utilities | `tests/App.test.tsx` copy-path, select-same-type, and refresh-retains-existing-selection coverage |
 | New File Templates | `tests/fileService.test.ts` template content/date variables; `tests/App.test.tsx` template modal create flow |
 | Color Rules | `tests/App.test.tsx` rule creation and highlighted entry coverage; browser DOM style check |
 | Quick Launch | `tests/fileService.test.ts` variable/argument construction; `tests/App.test.tsx` panel run/settings coverage |

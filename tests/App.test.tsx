@@ -461,6 +461,21 @@ describe("App", () => {
     );
   });
 
+  it("keeps existing selections when refreshing a pane", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Space Notes.md"));
+    expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument();
+
+    await user.click(within(pane).getByLabelText("Refresh pane"));
+
+    await waitFor(() => expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument());
+    expect(within(pane).getByText("Space Notes.md").closest("button")).toHaveClass("selected");
+  });
+
   it("copies and moves files between panes through clipboard paste", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -600,8 +615,9 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
-    await user.click(screen.getByText("Space Notes.md"));
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
+    await user.click(within(pane).getByText("Space Notes.md"));
     await user.click(screen.getByLabelText("Batch rename"));
 
     const dialog = screen.getByRole("dialog", { name: "Batch rename" });
@@ -615,7 +631,7 @@ describe("App", () => {
       expect(history?.[0].changedCount).toBe(1);
     });
 
-    await user.click(screen.getByText("Space Notes.md"));
+    await user.click(within(pane).getByText("Space Notes.md"));
     await user.click(screen.getByLabelText("Batch rename"));
     const nextDialog = screen.getByRole("dialog", { name: "Batch rename" });
     const historyRegion = within(nextDialog).getByRole("region", { name: "Rename history" });
