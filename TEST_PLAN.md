@@ -8,8 +8,8 @@
 | Four explorer panes render | `tests/App.test.tsx`; browser DOM verification |
 | Modern responsive layout | Browser screenshot at `http://127.0.0.1:5188/`; overflow checks |
 | Pane navigation and path UI | `src/App.tsx` controls; browser DOM snapshot; path suggestion tests |
-| Local file operations | `tests/fileService.test.ts` temp-directory lifecycle, collision-safe copies, and blocked self/child folder copies |
-| Browser mock filesystem | `tests/browserMockApi.test.ts` directory tree rename/delete behavior and rename conflict parity with the desktop service |
+| Local file operations | `tests/fileService.test.ts` temp-directory lifecycle, collision-safe copies, blocked self/child folder copies, and Windows-invalid filename rejection |
+| Browser mock filesystem | `tests/browserMockApi.test.ts` directory tree rename/delete behavior, rename conflict parity, and Windows-invalid filename rejection |
 | Selection and path utilities | `tests/App.test.tsx` copy-path and select-same-type coverage |
 | New File Templates | `tests/fileService.test.ts` template content/date variables; `tests/App.test.tsx` template modal create flow |
 | Color Rules | `tests/App.test.tsx` rule creation and highlighted entry coverage; browser DOM style check |

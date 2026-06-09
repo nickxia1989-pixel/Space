@@ -168,6 +168,17 @@ function mockResult(message: string, affectedPaths: string[] = []): OperationRes
   return { ok: true, message, affectedPaths };
 }
 
+function validateMockItemName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name cannot be empty.");
+  if (/[<>:"/\\|?*]/.test(trimmed)) throw new Error("Name contains characters Windows does not allow.");
+  if (/[. ]$/.test(trimmed)) throw new Error("Name cannot end with a space or period.");
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(trimmed.split(".")[0])) {
+    throw new Error("Name uses a reserved Windows device name.");
+  }
+  return trimmed;
+}
+
 function mockJoin(parent: string, name: string): string {
   return `${parent.replace(/[\\/]+$/, "")}\\${name}`;
 }
@@ -329,19 +340,20 @@ function createBrowserMockApi(): SpaceApi {
       return mockSuggestPaths(request);
     },
     async createFolder(request: CreateItemRequest) {
-      const entry = createMockEntry(request.parentPath, request.name, true);
+      const entry = createMockEntry(request.parentPath, validateMockItemName(request.name), true);
       mockEntries.set(request.parentPath, [...(mockEntries.get(request.parentPath) ?? []), entry]);
       mockEntries.set(entry.path, []);
       return entry;
     },
     async createFile(request: CreateItemRequest) {
-      const entry = createMockEntry(request.parentPath, expandMockDateVariables(request.name), false);
+      const entry = createMockEntry(request.parentPath, validateMockItemName(expandMockDateVariables(request.name)), false);
       mockEntries.set(request.parentPath, [...(mockEntries.get(request.parentPath) ?? []), entry]);
       return entry;
     },
     async renameItem(request: RenameRequest) {
       const parent = parentPath(request.path);
-      const targetPath = mockJoin(parent, request.newName);
+      const newName = validateMockItemName(request.newName);
+      const targetPath = mockJoin(parent, newName);
       if (!mockPathEquals(request.path, targetPath) && mockPathExists(targetPath)) {
         throw new Error("A file or folder with that name already exists.");
       }

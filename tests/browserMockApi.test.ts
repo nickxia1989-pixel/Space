@@ -29,4 +29,20 @@ describe("browser mock API", () => {
       api.renameItem({ path: `${desktopPath}\\Todo.txt`, newName: "Project Brief.pdf" })
     ).rejects.toThrow("A file or folder with that name already exists.");
   });
+
+  it("rejects Windows-invalid browser mock item names", async () => {
+    const api = getSpaceApi();
+    await api.bootstrap();
+    const desktopPath = "C:\\Users\\Traveler\\Desktop";
+
+    await expect(api.createFile({ parentPath: desktopPath, name: "bad." })).rejects.toThrow(
+      "Name cannot end with a space or period."
+    );
+    await expect(api.createFolder({ parentPath: desktopPath, name: "NUL" })).rejects.toThrow(
+      "Name uses a reserved Windows device name."
+    );
+    await expect(api.renameItem({ path: `${desktopPath}\\Todo.txt`, newName: "COM1.txt" })).rejects.toThrow(
+      "Name uses a reserved Windows device name."
+    );
+  });
 });

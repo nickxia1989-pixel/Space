@@ -202,7 +202,14 @@ function validateItemName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name cannot be empty.");
   if (/[<>:"/\\|?*]/.test(trimmed)) throw new Error("Name contains characters Windows does not allow.");
+  if (/[. ]$/.test(trimmed)) throw new Error("Name cannot end with a space or period.");
+  if (isReservedWindowsName(trimmed)) throw new Error("Name uses a reserved Windows device name.");
   return trimmed;
+}
+
+function isReservedWindowsName(name: string): boolean {
+  const baseName = path.parse(name).name.toUpperCase();
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(baseName);
 }
 
 export async function createFolder(request: CreateItemRequest): Promise<FileEntry> {
@@ -584,6 +591,7 @@ function validateTargetFileName(name: string): string | undefined {
   if (!name.trim()) return "Name cannot be empty.";
   if (/[<>:"/\\|?*]/.test(name)) return "Name contains characters Windows does not allow.";
   if (/[. ]$/.test(name)) return "Name cannot end with a space or period.";
+  if (isReservedWindowsName(name)) return "Name uses a reserved Windows device name.";
   return undefined;
 }
 

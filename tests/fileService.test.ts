@@ -124,6 +124,41 @@ describe("fileService", () => {
     await expect(fs.readFile(file.path, "utf8")).resolves.toBe(`# Report ${year}\n`);
   });
 
+  it("rejects Windows-invalid item names before filesystem operations", async () => {
+    await expect(createFile({ parentPath: tempRoot, name: "bad." })).rejects.toThrow(
+      "Name cannot end with a space or period."
+    );
+    await expect(createFolder({ parentPath: tempRoot, name: "CON" })).rejects.toThrow(
+      "Name uses a reserved Windows device name."
+    );
+
+    const file = await createFile({ parentPath: tempRoot, name: "valid.txt" });
+    await expect(renameItem({ path: file.path, newName: "AUX.txt" })).rejects.toThrow(
+      "Name uses a reserved Windows device name."
+    );
+
+    const preview = await previewBatchRename({
+      paths: [file.path],
+      rule: {
+        pattern: "COM1",
+        startNumber: 1,
+        step: 1,
+        padLength: 2,
+        prefix: "",
+        suffix: "",
+        find: "",
+        replace: "",
+        useRegex: false,
+        caseSensitive: false,
+        caseMode: "none",
+        includeExtension: false
+      }
+    });
+    expect(preview.canApply).toBe(false);
+    expect(preview.items[0].status).toBe("invalid");
+    expect(preview.items[0].message).toBe("Name uses a reserved Windows device name.");
+  });
+
   it("expands Quick Launch variables and builds app invocations", async () => {
     const selectedFile = path.join(tempRoot, "note.txt");
     const selectedFolder = path.join(tempRoot, "Folder");
