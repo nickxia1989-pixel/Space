@@ -1266,7 +1266,11 @@ export default function App() {
       });
   }
 
-  async function perform(label: string, action: () => Promise<OperationResult | unknown>, refreshIds: number[] = [activePaneId]) {
+  async function perform(
+    label: string,
+    action: () => Promise<OperationResult | unknown>,
+    refreshIds: number[] = [activePaneId]
+  ): Promise<boolean> {
     try {
       const result = await action();
       const message =
@@ -1275,8 +1279,10 @@ export default function App() {
           : `${label} complete.`;
       showToast("success", message);
       await Promise.all([...new Set(refreshIds)].map((id) => refreshPane(id)));
+      return true;
     } catch (error) {
       showToast("error", `${label} failed: ${getErrorMessage(error)}`);
+      return false;
     }
   }
 
@@ -1382,12 +1388,12 @@ export default function App() {
     const pane = panes.find((item) => item.id === paneId);
     if (!pane || !clipboard?.paths.length) return;
     const operation = clipboard.mode === "copy" ? api.copyItems : api.moveItems;
-    await perform(
+    const succeeded = await perform(
       clipboard.mode === "copy" ? "Paste copy" : "Paste move",
       () => operation({ sources: clipboard.paths, destination: pane.path }),
       paneIds
     );
-    if (clipboard.mode === "cut") setClipboard(null);
+    if (succeeded && clipboard.mode === "cut") setClipboard(null);
   }
 
   async function sendSelectionToPane(sourcePaneId: number, targetPaneId: number, mode: ClipboardMode) {

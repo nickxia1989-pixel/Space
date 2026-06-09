@@ -368,6 +368,23 @@ describe("App", () => {
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
   });
 
+  it("keeps cut clipboard contents when paste move fails", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane1 = await screen.findByLabelText("Pane 1");
+    const pane2 = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
+
+    await user.click(within(pane1).getByText("Desktop"));
+    await user.click(screen.getByLabelText("Cut"));
+    await user.click(pane2);
+    await user.click(screen.getByLabelText("Paste"));
+
+    expect(await screen.findByText("Paste move failed: Cannot move a folder into itself.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Paste")).not.toBeDisabled();
+  });
+
   it("copies from the pane that owns the transfer button even when another pane is active", async () => {
     const user = userEvent.setup();
     render(<App />);
