@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { getSpaceApi } from "../src/api";
+import { beforeEach, describe, expect, it } from "vitest";
+import { __resetBrowserMockFileSystemForTests, getSpaceApi } from "../src/api";
 
 describe("browser mock API", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    __resetBrowserMockFileSystemForTests();
+  });
+
   it("keeps directory children reachable after rename and removes them after delete", async () => {
     const api = getSpaceApi();
     const desktopPath = "C:\\Users\\Traveler\\Desktop";
@@ -44,5 +49,34 @@ describe("browser mock API", () => {
     await expect(api.renameItem({ path: `${desktopPath}\\Todo.txt`, newName: "COM1.txt" })).rejects.toThrow(
       "Name uses a reserved Windows device name."
     );
+  });
+
+  it("searches only inside the requested root and respects recursion and limits", async () => {
+    const api = getSpaceApi();
+    const bootstrap = await api.bootstrap();
+    const downloadsPath = `${bootstrap.homePath}\\Downloads`;
+
+    await expect(
+      api.searchFiles({ rootPath: bootstrap.homePath, query: "Archive", recursive: false, limit: 10 })
+    ).resolves.toEqual([]);
+
+    const recursiveResults = await api.searchFiles({
+      rootPath: bootstrap.homePath,
+      query: "Archive",
+      recursive: true,
+      limit: 10
+    });
+    expect(recursiveResults.map((entry) => entry.path)).toEqual([
+      `${downloadsPath}\\Archive.tar`,
+      `${downloadsPath}\\Archive.zip`
+    ]);
+
+    const limitedResults = await api.searchFiles({
+      rootPath: downloadsPath,
+      query: "Archive",
+      recursive: false,
+      limit: 1
+    });
+    expect(limitedResults.map((entry) => entry.path)).toEqual([`${downloadsPath}\\Archive.tar`]);
   });
 });

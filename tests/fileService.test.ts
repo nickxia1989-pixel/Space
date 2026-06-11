@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   calculateHash,
@@ -90,6 +91,22 @@ describe("fileService", () => {
 
     expect(path.basename(firstCopy.affectedPaths![0])).toBe("report copy.txt");
     expect(path.basename(secondCopy.affectedPaths![0])).toBe("report copy 2.txt");
+  });
+
+  it("creates valid empty Office documents for common new-file templates", async () => {
+    const docx = await createFile({ parentPath: tempRoot, name: "New Document.docx" });
+    const xlsx = await createFile({ parentPath: tempRoot, name: "New Workbook.xlsx" });
+    const pptx = await createFile({ parentPath: tempRoot, name: "New Deck.pptx" });
+
+    const docxZip = await JSZip.loadAsync(await fs.readFile(docx.path));
+    const xlsxZip = await JSZip.loadAsync(await fs.readFile(xlsx.path));
+    const pptxZip = await JSZip.loadAsync(await fs.readFile(pptx.path));
+
+    expect(docxZip.file("word/document.xml")).not.toBeNull();
+    expect(xlsxZip.file("xl/workbook.xml")).not.toBeNull();
+    expect(xlsxZip.file("xl/worksheets/sheet1.xml")).not.toBeNull();
+    expect(pptxZip.file("ppt/presentation.xml")).not.toBeNull();
+    expect(pptxZip.file("ppt/slides/slide1.xml")).not.toBeNull();
   });
 
   it("blocks copying a folder into itself or one of its children", async () => {

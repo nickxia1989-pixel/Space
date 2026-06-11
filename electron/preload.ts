@@ -15,6 +15,8 @@ import type {
   RenameRequest,
   SearchOptions,
   SpaceApi,
+  SvnCommandRequest,
+  SystemContextMenuRequest,
   WorkspaceDocument
 } from "../src/shared.js";
 
@@ -44,8 +46,13 @@ const api: SpaceApi = {
   openTerminal: (path: string) => ipcRenderer.invoke("space:open-terminal", path),
   copyTextToClipboard: (text: string) => ipcRenderer.invoke("space:copy-text-to-clipboard", text),
   runQuickLaunch: (request: QuickLaunchRunRequest) => ipcRenderer.invoke("space:run-quick-launch", request),
+  runSvnCommand: (request: SvnCommandRequest) => ipcRenderer.invoke("space:svn-command", request),
+  showSystemContextMenu: (request: SystemContextMenuRequest) => ipcRenderer.invoke("space:show-system-context-menu", request),
   getWorkspace: () => ipcRenderer.invoke("space:get-workspace"),
-  saveWorkspace: (snapshot: WorkspaceDocument) => ipcRenderer.invoke("space:save-workspace", snapshot)
+  saveWorkspace: (snapshot: WorkspaceDocument) => ipcRenderer.invoke("space:save-workspace", snapshot),
+  minimizeWindow: () => ipcRenderer.invoke("space:window-minimize"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("space:window-toggle-maximize"),
+  closeWindow: () => ipcRenderer.invoke("space:window-close")
 };
 
 contextBridge.exposeInMainWorld("spaceAPI", api);

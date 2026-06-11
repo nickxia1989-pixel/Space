@@ -9,11 +9,20 @@ import {
   Download,
   ExternalLink,
   File,
+  FileArchive,
+  FileBox,
+  FileCode,
+  FileCog,
+  FileDigit,
+  FileImage,
   FilePlus2,
+  FileSpreadsheet,
   FileText,
+  FileType,
   Folder,
   FolderPlus,
   Grid2X2,
+  GripVertical,
   HardDrive,
   Hash as HashIcon,
   Home,
@@ -21,15 +30,16 @@ import {
   LayoutGrid,
   List,
   ListFilter,
+  Maximize2,
+  Minimize2,
   Monitor,
   MoreVertical,
   Music,
-  Palette,
   PanelRight,
   Pencil,
   Plus,
+  Presentation,
   RefreshCcw,
-  Rocket,
   Rows3,
   Scissors,
   Search,
@@ -37,10 +47,14 @@ import {
   Star,
   Terminal,
   Trash2,
-  Video
+  X,
+  Video,
+  Braces,
+  Database,
+  Film
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { getSpaceApi } from "./api";
 import {
@@ -60,6 +74,7 @@ import type {
   ColorRuleNameMatch,
   ColorRuleTarget,
   ColorRuleTimeUnit,
+  DriveInfo,
   FileEntry,
   HashAlgorithm,
   KnownLocation,
@@ -96,6 +111,7 @@ interface PaneState extends WorkspacePaneSnapshot {
   anchorPath?: string;
   filter: string;
   recursiveSearch: boolean;
+  filterVisible: boolean;
   addressDraft: string;
   loading: boolean;
   error?: string;
@@ -117,17 +133,12 @@ interface ContextMenuState {
   x: number;
   y: number;
   paneId: number;
-  path?: string;
+  entry?: FileEntry;
 }
 
 interface ArchiveBrowserState {
   archivePath: string;
   destinationPath: string;
-}
-
-interface WorkspaceSearchResult {
-  entry: FileEntry;
-  sourceLabels: string[];
 }
 
 interface HashCompareResult {
@@ -136,14 +147,24 @@ interface HashCompareResult {
   error?: string;
 }
 
+interface PaneDragState {
+  sourcePaneId: number;
+  currentPaneId: number;
+  startPath: string;
+  startName: string;
+  x: number;
+  y: number;
+  moved: boolean;
+}
+
 const paneIds = [1, 2, 3, 4];
 const layoutModes: LayoutMode[] = ["grid", "columns", "rows", "focus"];
 const sortKeys: SortKey[] = ["name", "size", "modifiedAt", "type"];
 const sortLabels: Record<SortKey, string> = {
-  name: "Name",
-  size: "Size",
-  modifiedAt: "Modified",
-  type: "Type"
+  name: "名称",
+  size: "大小",
+  modifiedAt: "修改时间",
+  type: "类型"
 };
 const iconByName: Record<string, LucideIcon> = {
   home: Home,
@@ -180,7 +201,7 @@ const defaultBatchRenameRule: BatchRenameRule = {
 };
 
 const maxBatchRenameHistory = 50;
-const currentActionLayoutVersion = 4;
+const currentActionLayoutVersion = 6;
 const hashAlgorithms: HashAlgorithm[] = ["sha256", "md5", "sha1", "sha512"];
 
 const defaultToolbarActionIds = [
@@ -193,13 +214,9 @@ const defaultToolbarActionIds = [
   "selectSameType",
   "delete",
   "createZip",
-  "batchRename",
   "folderSync",
   "addShelf",
   "hashCompare",
-  "colorRules",
-  "quickLaunch",
-  "workspaceSearch",
   "refresh",
   "terminal",
   "bookmark"
@@ -214,48 +231,73 @@ const defaultContextMenuActionIds = [
   "delete",
   "hash",
   "addShelf",
-  "quickLaunch",
   "terminal",
   "reveal"
 ];
-const toolbarActionCatalog = [
-  { id: "newFolder", label: "New Folder" },
-  { id: "newFile", label: "New File" },
-  { id: "copy", label: "Copy" },
-  { id: "copyPaths", label: "Copy Paths" },
-  { id: "cut", label: "Cut" },
-  { id: "paste", label: "Paste" },
-  { id: "selectSameType", label: "Select Same Type" },
-  { id: "delete", label: "Delete" },
-  { id: "createZip", label: "Create ZIP Archive" },
-  { id: "batchRename", label: "Batch Rename" },
-  { id: "folderSync", label: "Folder Sync" },
-  { id: "addShelf", label: "Add To Shelf" },
-  { id: "hashCompare", label: "Hash Compare" },
-  { id: "colorRules", label: "Color Rules" },
-  { id: "quickLaunch", label: "Quick Launch" },
-  { id: "workspaceSearch", label: "Workspace Search" },
-  { id: "refresh", label: "Refresh" },
-  { id: "terminal", label: "Open Terminal" },
-  { id: "bookmark", label: "Add Bookmark" }
+
+type FixedContextMenuAction =
+  | "open"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "addShelf"
+  | "bookmark"
+  | "reveal"
+  | "svnUpdate"
+  | "svnCommit"
+  | "newItem";
+
+const fixedContextMenuGroups: Array<Array<{ id: FixedContextMenuAction; label: string }>> = [
+  [
+    { id: "open", label: "打开" },
+    { id: "copy", label: "复制" },
+    { id: "cut", label: "剪切" },
+    { id: "paste", label: "粘贴" }
+  ],
+  [
+    { id: "addShelf", label: "放入暂存架" },
+    { id: "bookmark", label: "添加到快捷入口" },
+    { id: "reveal", label: "资源管理器打开所在位置" }
+  ],
+  [
+    { id: "svnUpdate", label: "SVN Update" },
+    { id: "svnCommit", label: "SVN Commit" }
+  ],
+  [{ id: "newItem", label: "新建" }]
 ];
+const toolbarActionCatalog = [
+  { id: "newFolder", label: "新建文件夹" },
+  { id: "newFile", label: "新建文件" },
+  { id: "copy", label: "复制" },
+  { id: "copyPaths", label: "复制路径" },
+  { id: "cut", label: "剪切" },
+  { id: "paste", label: "粘贴" },
+  { id: "selectSameType", label: "选择同类型" },
+  { id: "delete", label: "删除" },
+  { id: "createZip", label: "创建 ZIP" },
+  { id: "folderSync", label: "文件夹同步" },
+  { id: "addShelf", label: "加入暂存架" },
+  { id: "hashCompare", label: "哈希对比" },
+  { id: "refresh", label: "刷新" },
+  { id: "terminal", label: "Windows Terminal" },
+  { id: "bookmark", label: "添加快捷入口" }
+];
+const primaryToolbarActionIds = new Set(["newFolder", "newFile", "copy", "cut", "paste", "delete", "refresh", "terminal"]);
 const contextMenuActionCatalog = [
-  { id: "copy", label: "Copy" },
-  { id: "copyPaths", label: "Copy Paths" },
-  { id: "selectSameType", label: "Select Same Type" },
-  { id: "cut", label: "Cut" },
-  { id: "paste", label: "Paste" },
-  { id: "rename", label: "Rename" },
-  { id: "delete", label: "Delete" },
-  { id: "hash", label: "Calculate SHA-256" },
-  { id: "addShelf", label: "Add To Shelf" },
-  { id: "quickLaunch", label: "Quick Launch" },
-  { id: "terminal", label: "Open Terminal" },
-  { id: "reveal", label: "Reveal In Explorer" }
+  { id: "copy", label: "复制" },
+  { id: "copyPaths", label: "复制路径" },
+  { id: "selectSameType", label: "选择同类型" },
+  { id: "cut", label: "剪切" },
+  { id: "paste", label: "粘贴" },
+  { id: "rename", label: "重命名" },
+  { id: "delete", label: "删除" },
+  { id: "hash", label: "计算 SHA-256" },
+  { id: "addShelf", label: "加入暂存架" },
+  { id: "terminal", label: "打开终端" },
+  { id: "reveal", label: "在资源管理器中显示" }
 ];
 const hotkeyActionCatalog = [
-  ...toolbarActionCatalog,
-  ...contextMenuActionCatalog.filter((item) => !toolbarActionCatalog.some((toolbarItem) => toolbarItem.id === item.id))
+  ...toolbarActionCatalog
 ];
 
 type ActionCatalogItem = { id: string; label: string };
@@ -263,37 +305,37 @@ type ActionCatalogItem = { id: string; label: string };
 const defaultFileTemplates: NewFileTemplate[] = [
   {
     id: "default-blank-text",
-    label: "Blank Text",
-    fileName: "New File.txt",
+    label: "空白文本",
+    fileName: "新建文件.txt",
     content: "",
     createdAt: 0
   },
   {
     id: "default-markdown-note",
-    label: "Markdown Note",
-    fileName: "Note-$date(yyyy-MM-dd).md",
+    label: "Markdown 笔记",
+    fileName: "笔记-$date(yyyy-MM-dd).md",
     content: "# $date(yyyy-MM-dd)\n\n",
     createdAt: 0
   },
   {
-    id: "default-json",
-    label: "JSON",
-    fileName: "data-$date(yyyyMMdd).json",
-    content: "{\n  \"createdAt\": \"$date(yyyy-MM-dd HH:mm:ss)\"\n}\n",
+    id: "default-word",
+    label: "Word 文档",
+    fileName: "新建文档.docx",
+    content: "",
     createdAt: 0
   },
   {
-    id: "default-powershell",
-    label: "PowerShell Script",
-    fileName: "script-$date(yyyyMMdd).ps1",
-    content: "# Created $date(yyyy-MM-dd HH:mm:ss)\n\n",
+    id: "default-excel",
+    label: "Excel 工作簿",
+    fileName: "新建工作簿.xlsx",
+    content: "",
     createdAt: 0
   },
   {
-    id: "default-html",
-    label: "HTML Page",
-    fileName: "index.html",
-    content: "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\" />\n  <title>New Page</title>\n</head>\n<body>\n  <main></main>\n</body>\n</html>\n",
+    id: "default-powerpoint",
+    label: "PowerPoint 演示文稿",
+    fileName: "新建演示文稿.pptx",
+    content: "",
     createdAt: 0
   }
 ];
@@ -641,6 +683,7 @@ function hydratePane(snapshot: WorkspacePaneSnapshot): PaneState {
     selectedPaths: [],
     filter: "",
     recursiveSearch: false,
+    filterVisible: false,
     addressDraft: snapshot.path,
     loading: true
   };
@@ -660,12 +703,23 @@ function snapshotFromPane(pane: PaneState): WorkspacePaneSnapshot {
 
 function getDefaultSnapshots(bootstrap: BootstrapPayload): WorkspacePaneSnapshot[] {
   const locationById = new Map(bootstrap.knownLocations.map((location) => [location.id, location.path]));
-  const paths = [
+  const candidates = [
     bootstrap.homePath,
     locationById.get("desktop") ?? bootstrap.homePath,
     locationById.get("downloads") ?? bootstrap.homePath,
-    locationById.get("documents") ?? bootstrap.homePath
+    locationById.get("documents") ?? bootstrap.homePath,
+    ...bootstrap.knownLocations.map((location) => location.path)
   ];
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(candidate);
+    if (paths.length === 4) break;
+  }
+  while (paths.length < 4) paths.push(bootstrap.homePath);
   return paths.map((filePath, index) => defaultPaneSnapshot(index + 1, filePath));
 }
 
@@ -741,7 +795,7 @@ function normalizeWorkspaceRecord(record: WorkspaceRecord, bootstrap: BootstrapP
 
 function normalizeWorkspaceDocument(saved: WorkspaceDocument | null, bootstrap: BootstrapPayload): WorkspaceDocument {
   if (!saved || !Array.isArray(saved.workspaces) || saved.workspaces.length === 0) {
-    const workspace = createWorkspaceRecord("Default", createDefaultWorkspaceSnapshot(bootstrap), "default");
+    const workspace = createWorkspaceRecord("默认", createDefaultWorkspaceSnapshot(bootstrap), "default");
     return {
       activeWorkspaceId: workspace.id,
       workspaces: [workspace],
@@ -808,6 +862,42 @@ function joinDisplayPath(parent: string, child: string): string {
   return `${parent.replace(/[\\/]+$/, "")}${separator}${child}`;
 }
 
+function clampPercent(value: number): number {
+  return Math.max(25, Math.min(75, value));
+}
+
+function fileUrlToPath(value: string): string {
+  try {
+    return decodeURIComponent(new URL(value).pathname).replace(/^\/([A-Za-z]:\/)/, "$1").replace(/\//g, "\\");
+  } catch {
+    return value;
+  }
+}
+
+function dataTransferPaths(dataTransfer: DataTransfer): string[] {
+  const rawPaths = dataTransfer.getData("application/x-space-paths");
+  if (rawPaths) {
+    try {
+      return JSON.parse(rawPaths) as string[];
+    } catch {
+      return [];
+    }
+  }
+  const filePaths = [...dataTransfer.files]
+    .map((file) => (file as File & { path?: string }).path || file.webkitRelativePath)
+    .filter((path): path is string => !!path);
+  if (filePaths.length) return filePaths;
+  const uriList = dataTransfer.getData("text/uri-list");
+  if (uriList) {
+    return uriList
+      .split(/\r?\n/)
+      .filter((line) => line && !line.startsWith("#"))
+      .map(fileUrlToPath);
+  }
+  const plainText = dataTransfer.getData("text/plain");
+  return plainText ? plainText.split(/\r?\n/).filter(Boolean) : [];
+}
+
 export default function App() {
   const api = useMemo<SpaceApi>(() => getSpaceApi(), []);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
@@ -842,12 +932,17 @@ export default function App() {
   const [actionSettingsOpen, setActionSettingsOpen] = useState(false);
   const [batchRenameOpen, setBatchRenameOpen] = useState(false);
   const [folderSyncOpen, setFolderSyncOpen] = useState(false);
-  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
+  const [workspaceRenameOpen, setWorkspaceRenameOpen] = useState(false);
+  const [toolbarOverflowOpen, setToolbarOverflowOpen] = useState(false);
   const [hashCompareOpen, setHashCompareOpen] = useState(false);
   const [archiveBrowser, setArchiveBrowser] = useState<ArchiveBrowserState | null>(null);
+  const [paneDragState, setPaneDragState] = useState<PaneDragState | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [paneGridSize, setPaneGridSize] = useState({ column: 50, row: 50 });
   const toastCounter = useRef(0);
   const addressSuggestionCounters = useRef<Record<number, number>>({});
   const paneLoadCounters = useRef<Record<number, number>>({});
+  const paneAreaRef = useRef<HTMLElement | null>(null);
 
   const activePane = panes.find((pane) => pane.id === activePaneId) ?? panes[0];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
@@ -1035,12 +1130,31 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    function closeContextMenu() {
-      setContextMenu(null);
-    }
+    if (!contextMenu) return;
+    const closeContextMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeContextMenu();
+    };
     window.addEventListener("click", closeContextMenu);
-    return () => window.removeEventListener("click", closeContextMenu);
-  }, []);
+    window.addEventListener("resize", closeContextMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", closeContextMenu);
+      window.removeEventListener("resize", closeContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!toolbarOverflowOpen) return;
+    const closeToolbarOverflow = () => setToolbarOverflowOpen(false);
+    window.addEventListener("click", closeToolbarOverflow);
+    window.addEventListener("keydown", closeToolbarOverflow);
+    return () => {
+      window.removeEventListener("click", closeToolbarOverflow);
+      window.removeEventListener("keydown", closeToolbarOverflow);
+    };
+  }, [toolbarOverflowOpen]);
 
   function showToast(kind: ToastState["kind"], message: string) {
     toastCounter.current += 1;
@@ -1065,6 +1179,144 @@ export default function App() {
       const retained = retainExistingSelection(pane.selectedPaths, pane.anchorPath, visibleEntries(nextPane));
       return { ...nextPane, ...retained };
     });
+  }
+
+  function togglePaneFilter(paneId: number) {
+    updatePane(paneId, (pane) => ({ ...pane, filterVisible: !pane.filterVisible }));
+  }
+
+  function paneIdAtPoint(clientX: number, clientY: number): number | null {
+    const element = document.elementFromPoint(clientX, clientY);
+    const paneElement = element?.closest?.(".explorer-pane");
+    const rawPaneId = paneElement?.getAttribute("data-pane-id");
+    const paneId = rawPaneId ? Number(rawPaneId) : Number(paneElement?.getAttribute("aria-label")?.match(/\d+/)?.[0]);
+    return Number.isFinite(paneId) && paneId > 0 ? paneId : null;
+  }
+
+  function swapPaneContents(
+    sourcePaneId: number,
+    targetPaneId: number,
+    options: { announce?: boolean; activate?: boolean } = { announce: true, activate: true }
+  ) {
+    if (sourcePaneId === targetPaneId) return;
+    setPanes((current) => {
+      const sourcePane = current.find((pane) => pane.id === sourcePaneId);
+      const targetPane = current.find((pane) => pane.id === targetPaneId);
+      if (!sourcePane || !targetPane) return current;
+      return current.map((pane) => {
+        if (pane.id === sourcePaneId) return { ...targetPane, id: sourcePaneId };
+        if (pane.id === targetPaneId) return { ...sourcePane, id: targetPaneId };
+        return pane;
+      });
+    });
+    if (options.activate ?? true) setActivePaneId(targetPaneId);
+    setPreviewPath(null);
+    setHashLine("");
+    if (options.announce ?? true) showToast("success", `已交换 P${sourcePaneId} 和 P${targetPaneId}。`);
+  }
+
+  function beginPanePointerSwap(sourcePaneId: number, event: React.MouseEvent | React.PointerEvent) {
+    if ("pointerType" in event && event.pointerType === "mouse" && event.type === "pointerdown") return;
+    if ("button" in event && event.button !== 0) return;
+    const sourcePane = panes.find((pane) => pane.id === sourcePaneId);
+    if (!sourcePane) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const moveEventName = "pointerId" in event ? "pointermove" : "mousemove";
+    const upEventName = "pointerId" in event ? "pointerup" : "mouseup";
+    let targetPaneId = sourcePaneId;
+    let moved = false;
+    setPaneDragState({
+      sourcePaneId,
+      currentPaneId: sourcePaneId,
+      startPath: sourcePane.path,
+      startName: pathName(sourcePane.path),
+      x: event.clientX,
+      y: event.clientY,
+      moved: false
+    });
+
+    const move = (moveEvent: PointerEvent | MouseEvent) => {
+      targetPaneId = paneIdAtPoint(moveEvent.clientX, moveEvent.clientY) ?? targetPaneId;
+      moved = targetPaneId !== sourcePaneId;
+      setPaneDragState((current) =>
+        current
+          ? {
+              ...current,
+              currentPaneId: targetPaneId,
+              x: moveEvent.clientX,
+              y: moveEvent.clientY,
+              moved
+            }
+          : current
+      );
+    };
+
+    const finish = () => {
+      window.removeEventListener(moveEventName, move);
+      window.removeEventListener(upEventName, finish);
+      setPaneDragState(null);
+      if (moved) {
+        swapPaneContents(sourcePaneId, targetPaneId, { announce: false, activate: true });
+        showToast("success", `已移动 P${sourcePaneId} 到 P${targetPaneId}。`);
+      }
+    };
+
+    window.addEventListener(moveEventName, move);
+    window.addEventListener(upEventName, finish, { once: true });
+  }
+
+  function beginPaneMouseSwap(sourcePaneId: number, event: React.MouseEvent) {
+    beginPanePointerSwap(sourcePaneId, event);
+  }
+
+  function beginPaneTouchSwap(sourcePaneId: number, event: React.PointerEvent) {
+    beginPanePointerSwap(sourcePaneId, event);
+  }
+
+  function beginPaneGridResize(axis: "column" | "row", event: React.PointerEvent | React.MouseEvent) {
+    const area = paneAreaRef.current;
+    if (!area) return;
+    event.preventDefault();
+    const rect = area.getBoundingClientRect();
+    const moveEventName = "pointerId" in event ? "pointermove" : "mousemove";
+    const upEventName = "pointerId" in event ? "pointerup" : "mouseup";
+    const updateFromPointer = (pointerEvent: PointerEvent | MouseEvent) => {
+      const rawPercent =
+        axis === "column"
+          ? ((pointerEvent.clientX - rect.left) / rect.width) * 100
+          : ((pointerEvent.clientY - rect.top) / rect.height) * 100;
+      const percent = clampPercent(rawPercent);
+      setPaneGridSize((current) => ({ ...current, [axis]: percent }));
+    };
+    const stop = () => {
+      window.removeEventListener(moveEventName, updateFromPointer);
+      window.removeEventListener(upEventName, stop);
+    };
+    window.addEventListener(moveEventName, updateFromPointer);
+    window.addEventListener(upEventName, stop);
+  }
+
+  async function addBookmarkPath(targetPath: string) {
+    const trimmedPath = targetPath.trim();
+    if (!trimmedPath) return;
+    try {
+      const payload = await api.listDirectory(trimmedPath);
+      const systemShortcutExists =
+        bootstrap?.knownLocations.some((location) => location.path.toLowerCase() === payload.path.toLowerCase()) ?? false;
+      const exists = systemShortcutExists || bookmarks.some((bookmark) => bookmark.path.toLowerCase() === payload.path.toLowerCase());
+      if (exists) {
+        showToast("info", "快捷入口已存在。");
+        return;
+      }
+      setBookmarks((current) => [
+        ...current,
+        { id: `bookmark-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, label: pathName(payload.path), path: payload.path, icon: "star" }
+      ]);
+      showToast("success", "已添加快捷入口。");
+    } catch {
+      showToast("error", "只能把文件夹添加到快捷入口。");
+    }
   }
 
   function getCurrentWorkspaceSnapshot(): WorkspaceSnapshot {
@@ -1161,7 +1413,6 @@ export default function App() {
     setPreviewPath(null);
     setHashLine("");
     setClipboard(null);
-    setContextMenu(null);
     setQuickLaunchMenuOpen(false);
     const hydrated = workspace.panes.map(hydratePane);
     setPanes(hydrated);
@@ -1202,7 +1453,7 @@ export default function App() {
 
   async function createNewWorkspace() {
     if (!bootstrap) return;
-    const record = createWorkspaceRecord(`Workspace ${workspaces.length + 1}`, createDefaultWorkspaceSnapshot(bootstrap));
+    const record = createWorkspaceRecord(`工作区 ${workspaces.length + 1}`, createDefaultWorkspaceSnapshot(bootstrap));
     setWorkspaces((current) => [...saveCurrentWorkspaceToList(current), record]);
     await loadWorkspaceRecord(record);
     showToast("success", "Workspace created.");
@@ -1210,19 +1461,30 @@ export default function App() {
 
   async function cloneWorkspace() {
     const sourceName = activeWorkspace?.name ?? "Workspace";
-    const record = createWorkspaceRecord(`${sourceName} Copy`, getCurrentWorkspaceSnapshot());
+    const record = createWorkspaceRecord(`${sourceName} 副本`, getCurrentWorkspaceSnapshot());
     setWorkspaces((current) => [...saveCurrentWorkspaceToList(current), record]);
     await loadWorkspaceRecord(record);
     showToast("success", "Workspace cloned.");
   }
 
-  function renameWorkspace() {
+  function requestRenameWorkspace() {
     if (!activeWorkspace) return;
-    const name = window.prompt("Workspace name", activeWorkspace.name);
-    if (!name?.trim()) return;
-    setWorkspaces((current) =>
-      current.map((workspace) => (workspace.id === activeWorkspace.id ? { ...workspace, name: name.trim() } : workspace))
+    setWorkspaceRenameOpen(true);
+  }
+
+  function saveWorkspaceName(name: string) {
+    if (!activeWorkspace) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    const nextWorkspaces = workspaces.map((workspace) =>
+      workspace.id === activeWorkspace.id ? { ...workspace, name: trimmedName } : workspace
     );
+    const document = createWorkspaceDocument(getCurrentWorkspaceSnapshot(), nextWorkspaces);
+    if (!document) return;
+    setWorkspaces(document.workspaces);
+    void api.saveWorkspace(document);
+    setWorkspaceRenameOpen(false);
+    showToast("success", "工作区已重命名。");
   }
 
   async function deleteWorkspace() {
@@ -1449,6 +1711,77 @@ export default function App() {
     }
   }
 
+  function contextTargetPath(menu: ContextMenuState): string {
+    const pane = paneById(menu.paneId);
+    return menu.entry?.path ?? pane?.path ?? "";
+  }
+
+  function contextBookmarkPath(menu: ContextMenuState): string {
+    const pane = paneById(menu.paneId);
+    if (menu.entry?.isDirectory) return menu.entry.path;
+    return menu.entry?.parentPath ?? pane?.path ?? "";
+  }
+
+  function openContextTarget(menu: ContextMenuState) {
+    const pane = paneById(menu.paneId);
+    if (!pane) return;
+    if (menu.entry) {
+      openEntry(menu.paneId, menu.entry);
+      return;
+    }
+    void perform("Open", () => api.openPath(pane.path), []);
+  }
+
+  function runContextSvnCommand(menu: ContextMenuState, command: "update" | "commit") {
+    const targetPath = contextTargetPath(menu);
+    if (!targetPath) return;
+    const label = command === "update" ? "SVN Update" : "SVN Commit";
+    void perform(label, () => api.runSvnCommand({ path: targetPath, command }), [menu.paneId]);
+  }
+
+  function runContextMenuAction(actionId: FixedContextMenuAction) {
+    const menu = contextMenu;
+    if (!menu) return;
+    setContextMenu(null);
+    setActivePaneId(menu.paneId);
+    switch (actionId) {
+      case "open":
+        openContextTarget(menu);
+        break;
+      case "copy":
+        copySelection("copy", menu.paneId);
+        break;
+      case "cut":
+        copySelection("cut", menu.paneId);
+        break;
+      case "paste":
+        void pasteInto(menu.paneId);
+        break;
+      case "addShelf":
+        addSelectionToShelf(menu.paneId);
+        break;
+      case "bookmark":
+        void addBookmarkPath(contextBookmarkPath(menu));
+        break;
+      case "reveal": {
+        const targetPath = contextTargetPath(menu);
+        if (targetPath) void perform("Reveal", () => api.revealPath(targetPath), []);
+        break;
+      }
+      case "svnUpdate":
+        runContextSvnCommand(menu, "update");
+        break;
+      case "svnCommit":
+        runContextSvnCommand(menu, "commit");
+        break;
+      case "newItem":
+        setNewFileOpen(true);
+        break;
+      default:
+        break;
+    }
+  }
+
   function copySelection(mode: ClipboardMode, paneId = activePaneId) {
     const pane = paneById(paneId);
     if (!pane?.selectedPaths.length) return;
@@ -1498,26 +1831,6 @@ export default function App() {
       setClipboard(null);
       await recoverMovedPanes(sources, destination, result);
     }
-  }
-
-  async function sendSelectionToPane(sourcePaneId: number, targetPaneId: number, mode: ClipboardMode) {
-    const sourcePane = paneById(sourcePaneId);
-    if (!sourcePane || !sourcePane.selectedPaths.length || targetPaneId === sourcePane.id) return;
-    const targetPane = panes.find((pane) => pane.id === targetPaneId);
-    if (!targetPane) return;
-    const sources = [...sourcePane.selectedPaths];
-    const destination = targetPane.path;
-    const refreshIds = operationRefreshIds([sourcePane.id, targetPaneId], [destination, ...sources.map(parentPath)]);
-    setActivePaneId(sourcePane.id);
-    const result = await perform(
-      mode === "copy" ? "Copy to pane" : "Move to pane",
-      () =>
-        mode === "copy"
-          ? api.copyItems({ sources, destination })
-          : api.moveItems({ sources, destination }),
-      refreshIds
-    );
-    if (result && mode === "cut") await recoverMovedPanes(sources, destination, result);
   }
 
   async function createItem(kind: "file" | "folder") {
@@ -1600,6 +1913,7 @@ export default function App() {
     try {
       const result = await api.calculateHash({ path: pane.selectedPaths[0], algorithm });
       setHashLine(`${algorithm.toUpperCase()} ${pathName(result.path)}: ${result.value}`);
+      setInspectorOpen(true);
       showToast("success", "Hash calculated.");
     } catch (error) {
       showToast("error", `Hash failed: ${getErrorMessage(error)}`);
@@ -1714,36 +2028,56 @@ export default function App() {
     );
   }
 
-  function addFileEntryToShelf(entry: FileEntry) {
-    const key = entry.path.toLowerCase();
-    if (stashItems.some((item) => item.path.toLowerCase() === key)) {
-      showToast("info", "Item is already on the shelf.");
-      return;
-    }
-    setStashItems((current) => [
-      ...current,
-      {
-        path: entry.path,
-        label: entry.name,
-        isDirectory: entry.isDirectory,
-        size: entry.size,
-        addedAt: Date.now()
-      }
-    ]);
-    showToast("success", "Added 1 item(s) to shelf.");
-  }
+  async function addPathsToShelf(paths: string[]) {
+    const normalizedPaths = paths.map((targetPath) => targetPath.trim()).filter(Boolean);
+    if (!normalizedPaths.length) return;
+    const entryByPath = new Map(panes.flatMap((pane) => pane.entries.map((entry) => [entry.path.toLowerCase(), entry] as const)));
+    const seen = new Set(stashItems.map((item) => item.path.toLowerCase()));
+    const additions: StashShelfItem[] = [];
 
-  async function openWorkspaceSearchResult(entry: FileEntry) {
-    if (!activePane) return;
-    setWorkspaceSearchOpen(false);
-    setPreviewPath(entry.path);
-    setHashLine("");
-    if (entry.isDirectory) {
-      await loadPane(activePane.id, entry.path);
-      return;
+    for (const targetPath of normalizedPaths) {
+      const key = targetPath.toLowerCase();
+      if (seen.has(key)) continue;
+      const entry = entryByPath.get(key);
+      if (entry) {
+        additions.push({
+          path: entry.path,
+          label: entry.name,
+          isDirectory: entry.isDirectory,
+          size: entry.size,
+          addedAt: Date.now()
+        });
+        seen.add(key);
+        continue;
+      }
+
+      try {
+        const payload = await api.listDirectory(targetPath);
+        additions.push({
+          path: payload.path,
+          label: pathName(payload.path),
+          isDirectory: true,
+          size: 0,
+          addedAt: Date.now()
+        });
+        seen.add(payload.path.toLowerCase());
+      } catch {
+        additions.push({
+          path: targetPath,
+          label: pathName(targetPath),
+          isDirectory: false,
+          size: 0,
+          addedAt: Date.now()
+        });
+        seen.add(key);
+      }
     }
-    await loadPane(activePane.id, entry.parentPath);
-    updatePane(activePane.id, (pane) => ({ ...pane, selectedPaths: [entry.path], anchorPath: entry.path }));
+
+    if (additions.length) setStashItems((current) => [...current, ...additions]);
+    showToast(
+      additions.length ? "success" : "info",
+      additions.length ? `Added ${additions.length} item(s) to shelf.` : "Dropped item is already on the shelf."
+    );
   }
 
   async function transferShelf(mode: ClipboardMode) {
@@ -1780,6 +2114,7 @@ export default function App() {
       }
     }
     setHashLine(`Shelf SHA-256\n${lines.join("\n")}`);
+    setInspectorOpen(true);
     showToast("success", `Hashed ${files.length} shelf file(s).`);
   }
 
@@ -1796,17 +2131,14 @@ export default function App() {
 
   function handleDrop(event: React.DragEvent, targetPaneId: number) {
     event.preventDefault();
-    const raw = event.dataTransfer.getData("application/x-space-paths");
-    if (!raw) return;
-    const targetPane = panes.find((pane) => pane.id === targetPaneId);
-    if (!targetPane) return;
-    let sources: string[];
-    try {
-      sources = JSON.parse(raw) as string[];
-    } catch {
-      showToast("error", "Drop payload was not recognized.");
+    const sourcePaneId = Number(event.dataTransfer.getData("application/x-space-pane-id"));
+    if (sourcePaneId) {
+      swapPaneContents(sourcePaneId, targetPaneId);
       return;
     }
+    const targetPane = panes.find((pane) => pane.id === targetPaneId);
+    if (!targetPane) return;
+    const sources = dataTransferPaths(event.dataTransfer);
     if (!sources.length) return;
     const mode: ClipboardMode = event.shiftKey ? "cut" : "copy";
     void perform(
@@ -1874,43 +2206,27 @@ export default function App() {
   }
 
   const toolbarActions: Record<string, { title: string; icon: LucideIcon; onClick: () => void; disabled?: boolean; active?: boolean }> = {
-    newFolder: { title: "New folder", icon: FolderPlus, onClick: () => void createItem("folder") },
-    newFile: { title: "New file", icon: FilePlus2, onClick: () => setNewFileOpen(true) },
-    copy: { title: "Copy", icon: Copy, onClick: () => copySelection("copy"), disabled: !activePane?.selectedPaths.length },
-    copyPaths: { title: "Copy paths", icon: ClipboardCopy, onClick: () => void copySelectedPaths(), disabled: !activePane?.selectedPaths.length },
-    cut: { title: "Cut", icon: Scissors, onClick: () => copySelection("cut"), disabled: !activePane?.selectedPaths.length },
-    paste: { title: "Paste", icon: FileText, onClick: () => void pasteInto(), disabled: !clipboard?.paths.length },
-    selectSameType: { title: "Select same type", icon: ListFilter, onClick: selectSameType, disabled: selectedEntries.length === 0 },
-    delete: { title: "Delete", icon: Trash2, onClick: () => void deleteSelected(), disabled: !activePane?.selectedPaths.length },
-    createZip: { title: "Create ZIP archive", icon: Archive, onClick: () => void createArchiveFromSelection(), disabled: !activePane?.selectedPaths.length },
-    batchRename: { title: "Batch rename", icon: FileText, onClick: () => setBatchRenameOpen(true), disabled: !activePane?.selectedPaths.length },
-    folderSync: { title: "Folder sync", icon: RefreshCcw, onClick: () => setFolderSyncOpen(true), disabled: !activePane },
-    addShelf: { title: "Add selection to shelf", icon: Plus, onClick: addSelectionToShelf, disabled: !activePane?.selectedPaths.length },
+    newFolder: { title: "新建文件夹", icon: FolderPlus, onClick: () => void createItem("folder") },
+    newFile: { title: "新建文件", icon: FilePlus2, onClick: () => setNewFileOpen(true) },
+    copy: { title: "复制", icon: Copy, onClick: () => copySelection("copy"), disabled: !activePane?.selectedPaths.length },
+    copyPaths: { title: "复制路径", icon: ClipboardCopy, onClick: () => void copySelectedPaths(), disabled: !activePane?.selectedPaths.length },
+    cut: { title: "剪切", icon: Scissors, onClick: () => copySelection("cut"), disabled: !activePane?.selectedPaths.length },
+    paste: { title: "粘贴", icon: FileText, onClick: () => void pasteInto(), disabled: !clipboard?.paths.length },
+    selectSameType: { title: "选择同类型", icon: ListFilter, onClick: selectSameType, disabled: selectedEntries.length === 0 },
+    delete: { title: "删除", icon: Trash2, onClick: () => void deleteSelected(), disabled: !activePane?.selectedPaths.length },
+    createZip: { title: "创建 ZIP", icon: Archive, onClick: () => void createArchiveFromSelection(), disabled: !activePane?.selectedPaths.length },
+    folderSync: { title: "文件夹同步", icon: RefreshCcw, onClick: () => setFolderSyncOpen(true), disabled: !activePane },
+    addShelf: { title: "加入暂存架", icon: Plus, onClick: addSelectionToShelf, disabled: !activePane?.selectedPaths.length },
     hashCompare: {
-      title: "Hash compare",
+      title: "哈希对比",
       icon: HashIcon,
       onClick: () => setHashCompareOpen(true),
       disabled: !selectedEntries.some((entry) => entry.isFile),
       active: hashCompareOpen
     },
-    colorRules: { title: "Color rules", icon: Palette, onClick: () => setColorRulesOpen(true), active: colorRules.some((rule) => rule.enabled) },
-    quickLaunch: {
-      title: "Quick launch",
-      icon: Rocket,
-      onClick: () => setQuickLaunchMenuOpen((open) => !open),
-      active: quickLaunchMenuOpen,
-      disabled: !activePane
-    },
-    workspaceSearch: {
-      title: "Workspace search",
-      icon: Search,
-      onClick: () => setWorkspaceSearchOpen(true),
-      active: workspaceSearchOpen,
-      disabled: panes.length === 0
-    },
-    refresh: { title: "Refresh", icon: RefreshCcw, onClick: () => void refreshPane() },
-    terminal: { title: "Open terminal", icon: Terminal, onClick: () => activePane && void perform("Terminal", () => api.openTerminal(activePane.path), []) },
-    bookmark: { title: "Add bookmark", icon: Star, onClick: addBookmark }
+    refresh: { title: "刷新", icon: RefreshCcw, onClick: () => void refreshPane() },
+    terminal: { title: "Windows Terminal", icon: Terminal, onClick: () => activePane && void perform("Windows Terminal", () => api.openTerminal(activePane.path), []) },
+    bookmark: { title: "添加快捷入口", icon: Star, onClick: addBookmark }
   };
 
   function triggerToolbarAction(actionId: string): boolean {
@@ -1951,8 +2267,20 @@ export default function App() {
     );
   }
 
+  const paneAreaStyle: CSSProperties | undefined =
+    layout === "grid"
+      ? {
+          gridTemplateColumns: `minmax(240px, ${paneGridSize.column}fr) minmax(240px, ${100 - paneGridSize.column}fr)`,
+          gridTemplateRows: `minmax(220px, ${paneGridSize.row}fr) minmax(220px, ${100 - paneGridSize.row}fr)`
+        }
+      : undefined;
+  const contextMenuPane = contextMenu ? paneById(contextMenu.paneId) : undefined;
+  const contextSelectionCount = contextMenuPane?.selectedPaths.length ?? 0;
+  const toolbarPrimaryIds = toolbarActionIds.filter((actionId) => primaryToolbarActionIds.has(actionId) && toolbarActions[actionId]);
+  const toolbarOverflowIds = toolbarActionIds.filter((actionId) => !primaryToolbarActionIds.has(actionId) && toolbarActions[actionId]);
+
   return (
-    <main className="app-shell" onKeyDown={handleKeyDown} tabIndex={-1}>
+    <main className={`app-shell ${inspectorOpen ? "inspector-open" : ""}`} onKeyDown={handleKeyDown} tabIndex={-1}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
@@ -1960,14 +2288,13 @@ export default function App() {
           </div>
           <div>
             <h1>Space</h1>
-            <span>Four-pane file manager</span>
+            <span>四窗格资源管理器</span>
           </div>
         </div>
 
-        <div className="toolbar" role="toolbar" aria-label="File operations">
-          {toolbarActionIds.map((actionId) => {
+        <div className="toolbar" role="toolbar" aria-label="文件操作">
+          {toolbarPrimaryIds.map((actionId) => {
             const action = toolbarActions[actionId];
-            if (!action) return null;
             return (
               <IconButton
                 key={actionId}
@@ -1976,18 +2303,62 @@ export default function App() {
                 icon={action.icon}
                 disabled={action.disabled}
                 active={action.active}
+                showLabel
               />
             );
           })}
+          {toolbarOverflowIds.length > 0 && (
+            <div className="toolbar-overflow" onClick={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                className={`icon-button toolbar-more-button ${toolbarOverflowOpen ? "active" : ""}`}
+                title="更多操作"
+                aria-label="更多操作"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setToolbarOverflowOpen((open) => !open);
+                }}
+              >
+                <MoreVertical size={16} />
+                <span className="icon-button-label">更多</span>
+              </button>
+              {toolbarOverflowOpen && (
+                <div className="toolbar-overflow-menu" role="menu" aria-label="更多文件操作">
+                  {toolbarOverflowIds.map((actionId) => {
+                    const action = toolbarActions[actionId];
+                    const OverflowIcon = action.icon;
+                    return (
+                      <button
+                        key={actionId}
+                        type="button"
+                        role="menuitem"
+                        disabled={action.disabled}
+                        onClick={() => {
+                          if (action.disabled) return;
+                          setToolbarOverflowOpen(false);
+                          action.onClick();
+                        }}
+                      >
+                        <OverflowIcon size={15} />
+                        <span>{action.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="layout-switcher" aria-label="Layout">
-          <IconButton title="Customize actions" onClick={() => setActionSettingsOpen(true)} icon={SlidersHorizontal} />
-          <IconButton title="Grid layout" onClick={() => setLayout("grid")} icon={Grid2X2} active={layout === "grid"} />
-          <IconButton title="Columns layout" onClick={() => setLayout("columns")} icon={Columns3} active={layout === "columns"} />
-          <IconButton title="Rows layout" onClick={() => setLayout("rows")} icon={Rows3} active={layout === "rows"} />
-          <IconButton title="Focus active pane" onClick={() => setLayout("focus")} icon={PanelRight} active={layout === "focus"} />
+          <IconButton title="自定义动作" onClick={() => setActionSettingsOpen(true)} icon={SlidersHorizontal} />
+          <IconButton title="网格布局" onClick={() => setLayout("grid")} icon={Grid2X2} active={layout === "grid"} />
+          <IconButton title="列布局" onClick={() => setLayout("columns")} icon={Columns3} active={layout === "columns"} />
+          <IconButton title="行布局" onClick={() => setLayout("rows")} icon={Rows3} active={layout === "rows"} />
+          <IconButton title="聚焦当前窗格" onClick={() => setLayout("focus")} icon={PanelRight} active={layout === "focus"} />
+          <IconButton title="检查器" onClick={() => setInspectorOpen((open) => !open)} icon={MoreVertical} active={inspectorOpen} />
         </div>
+        <WindowControls api={api} />
       </header>
 
       {quickLaunchMenuOpen && activePane && (
@@ -2009,22 +2380,25 @@ export default function App() {
         onSwitch={(workspaceId) => void switchWorkspace(workspaceId)}
         onNew={() => void createNewWorkspace()}
         onClone={() => void cloneWorkspace()}
-        onRename={renameWorkspace}
+        onRename={requestRenameWorkspace}
         onDelete={() => void deleteWorkspace()}
       />
 
-      <section className="workspace">
+      <section className={`workspace ${inspectorOpen ? "inspector-visible" : ""}`}>
         <Sidebar
           bootstrap={bootstrap}
           bookmarks={bookmarks}
           stashItems={stashItems}
           canAddSelection={!!activePane?.selectedPaths.length}
           onOpen={(targetPath) => activePane && void loadPane(activePane.id, targetPath)}
+          onAddBookmarkPath={(targetPath) => void addBookmarkPath(targetPath)}
           onRemoveBookmark={(id) => setBookmarks((current) => current.filter((bookmark) => bookmark.id !== id))}
           onAddSelectionToShelf={addSelectionToShelf}
+          onAddPathsToShelf={(paths) => void addPathsToShelf(paths)}
           onPreviewShelfItem={(targetPath) => {
             setPreviewPath(targetPath);
             setHashLine("");
+            setInspectorOpen(true);
           }}
           onRemoveShelfItem={(targetPath) =>
             setStashItems((current) => current.filter((item) => item.path.toLowerCase() !== targetPath.toLowerCase()))
@@ -2035,7 +2409,7 @@ export default function App() {
           onHashShelf={() => void hashShelf()}
         />
 
-        <section className={`pane-area layout-${layout}`} aria-label="Explorer panes">
+        <section ref={paneAreaRef} className={`pane-area layout-${layout}`} aria-label="Explorer panes" style={paneAreaStyle}>
           {panes.map((pane) => (
             <ExplorerPane
               key={pane.id}
@@ -2044,6 +2418,7 @@ export default function App() {
               colorRules={colorRules}
               addressSuggestions={addressSuggestions[pane.id] ?? []}
               active={pane.id === activePaneId}
+              dragTarget={paneDragState?.currentPaneId === pane.id && paneDragState.sourcePaneId !== pane.id}
               onActivate={() => setActivePaneId(pane.id)}
               onNavigate={(targetPath) => void loadPane(pane.id, targetPath)}
               onBack={() => goHistory(pane.id, -1)}
@@ -2058,6 +2433,7 @@ export default function App() {
               onFilterChange={(value) => updatePaneFilter(pane.id, value)}
               onRecursiveChange={(value) => updatePaneRecursiveSearch(pane.id, value)}
               onSearch={() => void runSearch(pane.id)}
+              onToggleFilter={() => togglePaneFilter(pane.id)}
               onSort={(sortKey) =>
                 updatePane(pane.id, (current) => ({
                   ...current,
@@ -2071,60 +2447,73 @@ export default function App() {
               onOpen={(entry) => openEntry(pane.id, entry)}
               onContextMenu={(event, entry) => {
                 event.preventDefault();
+                event.stopPropagation();
+                setActivePaneId(pane.id);
                 if (entry && !containsPath(pane.selectedPaths, entry.path)) {
                   selectEntry(pane.id, entry, event, visibleEntries(pane));
                 }
-                setContextMenu({ x: event.clientX, y: event.clientY, paneId: pane.id, path: entry?.path });
+                setContextMenu({ x: event.clientX, y: event.clientY, paneId: pane.id, entry });
               }}
               onDrop={(event) => handleDrop(event, pane.id)}
+              onPaneDragStart={(event) => {
+                event.dataTransfer.setData("application/x-space-pane-id", String(pane.id));
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onPaneMouseDown={(event) => beginPaneMouseSwap(pane.id, event)}
+              onPanePointerDown={(event) => beginPaneTouchSwap(pane.id, event)}
               onDragStart={(event, entry) => {
                 const payload = containsPath(pane.selectedPaths, entry.path) ? pane.selectedPaths : [entry.path];
                 event.dataTransfer.setData("application/x-space-paths", JSON.stringify(payload));
               }}
-              onCopyTo={(targetId) => void sendSelectionToPane(pane.id, targetId, "copy")}
-              onMoveTo={(targetId) => void sendSelectionToPane(pane.id, targetId, "cut")}
             />
           ))}
+          {layout === "grid" && (
+            <>
+              <div
+                className="pane-grid-splitter pane-grid-splitter-vertical"
+                style={{ left: `${paneGridSize.column}%` }}
+                onPointerDown={(event) => beginPaneGridResize("column", event)}
+                onMouseDown={(event) => beginPaneGridResize("column", event)}
+                role="separator"
+                aria-label="调整窗格列宽"
+              />
+              <div
+                className="pane-grid-splitter pane-grid-splitter-horizontal"
+                style={{ top: `${paneGridSize.row}%` }}
+                onPointerDown={(event) => beginPaneGridResize("row", event)}
+                onMouseDown={(event) => beginPaneGridResize("row", event)}
+                role="separator"
+                aria-label="调整窗格行高"
+              />
+            </>
+          )}
         </section>
 
-        <Inspector
-          targetPath={previewTarget ?? null}
-          api={api}
-          hashLine={hashLine}
-          onHash={() => void calculateSelectedHash("sha256")}
-          onReveal={() => previewTarget && void perform("Reveal", () => api.revealPath(previewTarget), [])}
-        />
+        {inspectorOpen && (
+          <Inspector
+            targetPath={previewTarget ?? null}
+            api={api}
+            hashLine={hashLine}
+            onHash={() => void calculateSelectedHash("sha256")}
+            onReveal={() => previewTarget && void perform("Reveal", () => api.revealPath(previewTarget), [])}
+          />
+        )}
       </section>
 
+      {paneDragState && (
+        <div className="pane-drag-ghost" style={{ transform: `translate3d(${paneDragState.x + 14}px, ${paneDragState.y + 14}px, 0)` }}>
+          <span>P{paneDragState.sourcePaneId}</span>
+          <strong>{paneDragState.startName}</strong>
+          <small>{paneDragState.startPath}</small>
+        </div>
+      )}
+
       {contextMenu && (
-        <ContextMenu
-          state={contextMenu}
-          actionIds={contextMenuActionIds}
-          onCopy={() => copySelection("copy", contextMenu.paneId)}
-          onCopyPaths={() => void copySelectedPaths(contextMenu.paneId)}
-          onSelectSameType={() => selectSameType(contextMenu.paneId)}
-          onCut={() => copySelection("cut", contextMenu.paneId)}
-          onPaste={() => void pasteInto(contextMenu.paneId)}
-          onRename={() => void renameSelected(contextMenu.paneId)}
-          onDelete={() => void deleteSelected(contextMenu.paneId)}
-          onHash={() => void calculateSelectedHash("sha256", contextMenu.paneId)}
-          onAddToShelf={() => addSelectionToShelf(contextMenu.paneId)}
-          onReveal={() => {
-            const pane = paneById(contextMenu.paneId);
-            if (pane?.selectedPaths[0]) void perform("Reveal", () => api.revealPath(pane.selectedPaths[0]), []);
-          }}
-          onOpenTerminal={() => {
-            const pane = panes.find((item) => item.id === contextMenu.paneId);
-            if (pane) void perform("Terminal", () => api.openTerminal(pane.path), []);
-          }}
-          onQuickLaunch={() => {
-            setActivePaneId(contextMenu.paneId);
-            setContextMenu(null);
-            setQuickLaunchMenuOpen(true);
-          }}
+        <FixedContextMenu
+          menu={contextMenu}
+          selectedCount={contextSelectionCount}
           canPaste={!!clipboard?.paths.length}
-          canAct={!!paneById(contextMenu.paneId)?.selectedPaths.length}
-          canSelectSameType={selectedEntriesForPane(paneById(contextMenu.paneId)).length > 0}
+          onAction={runContextMenuAction}
         />
       )}
 
@@ -2135,6 +2524,14 @@ export default function App() {
           onClose={() => setNewFileOpen(false)}
           onCreate={(request) => void createTemplatedFile(request)}
           onDeleteTemplate={(templateId) => setFileTemplates((current) => current.filter((template) => template.id !== templateId))}
+        />
+      )}
+
+      {workspaceRenameOpen && activeWorkspace && (
+        <WorkspaceRenameModal
+          workspace={activeWorkspace}
+          onClose={() => setWorkspaceRenameOpen(false)}
+          onSave={saveWorkspaceName}
         />
       )}
 
@@ -2211,18 +2608,6 @@ export default function App() {
         />
       )}
 
-      {workspaceSearchOpen && (
-        <WorkspaceSearchModal
-          api={api}
-          panes={panes}
-          activePaneId={activePaneId}
-          onClose={() => setWorkspaceSearchOpen(false)}
-          onOpen={(entry) => void openWorkspaceSearchResult(entry)}
-          onReveal={(entry) => void perform("Reveal", () => api.revealPath(entry.path), [])}
-          onAddToShelf={addFileEntryToShelf}
-        />
-      )}
-
       {hashCompareOpen && (
         <HashCompareModal
           api={api}
@@ -2246,6 +2631,55 @@ export default function App() {
   );
 }
 
+function FixedContextMenu({
+  menu,
+  selectedCount,
+  canPaste,
+  onAction
+}: {
+  menu: ContextMenuState;
+  selectedCount: number;
+  canPaste: boolean;
+  onAction: (actionId: FixedContextMenuAction) => void;
+}) {
+  const left = Math.max(6, Math.min(menu.x, window.innerWidth - 254));
+  const top = Math.max(6, Math.min(menu.y, window.innerHeight - 292));
+  const disabledByAction: Partial<Record<FixedContextMenuAction, boolean>> = {
+    copy: selectedCount === 0,
+    cut: selectedCount === 0,
+    paste: !canPaste,
+    addShelf: selectedCount === 0
+  };
+
+  return (
+    <div
+      className="context-menu"
+      style={{ left, top }}
+      role="menu"
+      aria-label="文件操作菜单"
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {fixedContextMenuGroups.map((group, groupIndex) => (
+        <Fragment key={`group-${groupIndex}`}>
+          {groupIndex > 0 && <hr />}
+          {group.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              disabled={disabledByAction[item.id]}
+              onClick={() => onAction(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 function QuickLaunchPanel({
   items,
   currentPath,
@@ -2261,22 +2695,22 @@ function QuickLaunchPanel({
 }) {
   const enabledItems = items.filter((item) => item.enabled);
   return (
-    <section className="quick-launch-panel" aria-label="Quick Launch">
+    <section className="quick-launch-panel" aria-label="快速启动">
       <div className="quick-launch-summary">
-        <strong>Quick Launch</strong>
-        <span title={currentPath}>{selectedCount ? `${selectedCount} selected` : pathName(currentPath)}</span>
+        <strong>快速启动</strong>
+        <span title={currentPath}>{selectedCount ? `已选 ${selectedCount} 项` : pathName(currentPath)}</span>
       </div>
       <div className="quick-launch-actions">
         {enabledItems.map((item) => (
           <button key={item.id} onClick={() => onRun(item)} title={item.command}>
-            <Rocket size={15} />
+            <Terminal size={15} />
             <span>{item.label}</span>
           </button>
         ))}
-        {enabledItems.length === 0 && <span className="quick-launch-empty">No enabled launch items.</span>}
+        {enabledItems.length === 0 && <span className="quick-launch-empty">没有启用的启动项。</span>}
       </div>
       <button className="quick-launch-manage" onClick={onManage}>
-        Manage
+        管理
       </button>
     </section>
   );
@@ -2327,11 +2761,11 @@ function QuickLaunchModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal quick-launch-modal" role="dialog" aria-modal="true" aria-label="Quick Launch settings">
+      <section className="modal quick-launch-modal" role="dialog" aria-modal="true" aria-label="快速启动设置">
         <header className="modal-header">
           <div>
-            <h2>Quick Launch</h2>
-            <span>Run apps, commands, or shortcuts from the active pane.</span>
+            <h2>快速启动</h2>
+            <span>从当前窗格运行应用、命令或快捷方式。</span>
           </div>
           <button onClick={onClose}>Close</button>
         </header>
@@ -2348,7 +2782,7 @@ function QuickLaunchModal({
                 className={item.id === selectedItem?.id ? "active" : ""}
                 onClick={() => setSelectedId(item.id)}
               >
-                <Rocket size={16} />
+                <Terminal size={16} />
                 <span>{item.label || "Untitled launch"}</span>
                 <small>{item.enabled ? item.type : "Disabled"}</small>
               </button>
@@ -2426,8 +2860,10 @@ function Sidebar({
   stashItems,
   canAddSelection,
   onOpen,
+  onAddBookmarkPath,
   onRemoveBookmark,
   onAddSelectionToShelf,
+  onAddPathsToShelf,
   onPreviewShelfItem,
   onRemoveShelfItem,
   onClearShelf,
@@ -2440,8 +2876,10 @@ function Sidebar({
   stashItems: StashShelfItem[];
   canAddSelection: boolean;
   onOpen: (path: string) => void;
+  onAddBookmarkPath: (path: string) => void;
   onRemoveBookmark: (id: string) => void;
   onAddSelectionToShelf: () => void;
+  onAddPathsToShelf: (paths: string[]) => void;
   onPreviewShelfItem: (path: string) => void;
   onRemoveShelfItem: (path: string) => void;
   onClearShelf: () => void;
@@ -2449,28 +2887,21 @@ function Sidebar({
   onMoveShelf: () => void;
   onHashShelf: () => void;
 }) {
+  const systemShortcutKeys = new Set(bootstrap.knownLocations.map((location) => location.path.toLowerCase()));
+  const shortcutRows = [
+    ...bootstrap.knownLocations.map((location) => ({ location, removable: false })),
+    ...bookmarks
+      .filter((bookmark) => !systemShortcutKeys.has(bookmark.path.toLowerCase()))
+      .map((location) => ({ location, removable: true }))
+  ];
+
   return (
     <aside className="sidebar">
-      <section>
-        <h2>Quick Access</h2>
-        {bootstrap.knownLocations.map((location) => (
-          <SidebarItem key={location.id} location={location} onOpen={onOpen} />
-        ))}
-      </section>
-      <section>
-        <h2>Drives</h2>
-        {bootstrap.drives.map((drive) => (
-          <button key={drive.path} className="sidebar-item" onClick={() => onOpen(drive.path)}>
-            <HardDrive size={16} />
-            <span>{drive.name}</span>
-            <small>{drive.path}</small>
-          </button>
-        ))}
-      </section>
       <StashShelf
         items={stashItems}
         canAddSelection={canAddSelection}
         onAddSelection={onAddSelectionToShelf}
+        onAddPaths={onAddPathsToShelf}
         onPreviewItem={onPreviewShelfItem}
         onRemoveItem={onRemoveShelfItem}
         onClear={onClearShelf}
@@ -2478,16 +2909,40 @@ function Sidebar({
         onMove={onMoveShelf}
         onHash={onHashShelf}
       />
-      <section>
-        <h2>Bookmarks</h2>
-        {bookmarks.length === 0 && <p className="empty-note">Add current pane folders with the star button.</p>}
-        {bookmarks.map((bookmark) => (
-          <div key={bookmark.id} className="bookmark-row">
-            <SidebarItem location={bookmark} onOpen={onOpen} />
-            <button className="ghost-mini" title="Remove bookmark" onClick={() => onRemoveBookmark(bookmark.id)}>
-              x
-            </button>
+      <section
+        className="shortcut-section"
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "link";
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          for (const targetPath of dataTransferPaths(event.dataTransfer)) {
+            onAddBookmarkPath(targetPath);
+          }
+        }}
+      >
+        <h2>快捷入口</h2>
+        {shortcutRows.length === 0 && <p className="empty-note">把任意文件夹拖到这里，或点击星标添加当前窗格。</p>}
+        {shortcutRows.map(({ location, removable }) => (
+          <div key={`${removable ? "bookmark" : "system"}-${location.id}`} className="bookmark-row">
+            <SidebarItem location={location} onOpen={onOpen} />
+            {removable ? (
+              <button className="ghost-mini" title="移除快捷入口" onClick={() => onRemoveBookmark(location.id)}>
+                x
+              </button>
+            ) : (
+              <span className="system-shortcut-tag" title="来自 Windows 快速访问">
+                Win
+              </span>
+            )}
           </div>
+        ))}
+      </section>
+      <section>
+        <h2>磁盘</h2>
+        {bootstrap.drives.map((drive) => (
+          <DriveSidebarItem key={drive.path} drive={drive} onOpen={onOpen} />
         ))}
       </section>
     </aside>
@@ -2498,6 +2953,7 @@ function StashShelf({
   items,
   canAddSelection,
   onAddSelection,
+  onAddPaths,
   onPreviewItem,
   onRemoveItem,
   onClear,
@@ -2508,6 +2964,7 @@ function StashShelf({
   items: StashShelfItem[];
   canAddSelection: boolean;
   onAddSelection: () => void;
+  onAddPaths: (paths: string[]) => void;
   onPreviewItem: (path: string) => void;
   onRemoveItem: (path: string) => void;
   onClear: () => void;
@@ -2517,28 +2974,39 @@ function StashShelf({
 }) {
   const fileCount = items.filter((item) => !item.isDirectory).length;
   return (
-    <section className="stash-section" aria-label="Stash Shelf">
+    <section
+      className="stash-section"
+      aria-label="Stash Shelf"
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onAddPaths(dataTransferPaths(event.dataTransfer));
+      }}
+    >
       <div className="section-heading-row">
-        <h2>Stash Shelf</h2>
+        <h2>暂存架</h2>
         <span>{items.length}</span>
       </div>
       <div className="stash-actions">
-        <button onClick={onAddSelection} disabled={!canAddSelection}>Add</button>
-        <button onClick={onCopy} disabled={!items.length}>Copy</button>
-        <button onClick={onMove} disabled={!items.length}>Move</button>
-        <button onClick={onHash} disabled={!fileCount}>Hash</button>
-        <button onClick={onClear} disabled={!items.length}>Clear</button>
+        <button onClick={onAddSelection} disabled={!canAddSelection}>加入</button>
+        <button onClick={onCopy} disabled={!items.length}>复制</button>
+        <button onClick={onMove} disabled={!items.length}>移动</button>
+        <button onClick={onHash} disabled={!fileCount}>哈希</button>
+        <button onClick={onClear} disabled={!items.length}>清空</button>
       </div>
-      {items.length === 0 && <p className="empty-note">Collect files from any pane, then copy or move them together.</p>}
+      {items.length === 0 && <p className="empty-note">从任意窗格收集文件，再统一复制或移动。</p>}
       <div className="stash-list">
         {items.map((item) => (
           <div key={item.path} className="stash-row">
             <button className="stash-item" title={item.path} onClick={() => onPreviewItem(item.path)}>
-              {item.isDirectory ? <Folder size={15} /> : <File size={15} />}
+              {item.isDirectory ? <Folder size={15} /> : <FileIcon entry={{ extension: fileExtensionFromName(item.label), isDirectory: false, name: item.label }} size={15} />}
               <span>{item.label}</span>
-              <small>{item.isDirectory ? "Folder" : formatBytes(item.size)}</small>
+              <small>{item.isDirectory ? "文件夹" : formatBytes(item.size)}</small>
             </button>
-            <button className="ghost-mini" title="Remove from shelf" onClick={() => onRemoveItem(item.path)}>
+            <button className="ghost-mini" title="从暂存架移除" onClick={() => onRemoveItem(item.path)}>
               x
             </button>
           </div>
@@ -2582,12 +3050,28 @@ function WorkspaceTabs({
         ))}
       </div>
       <div className="workspace-tab-actions">
-        <IconButton title="New workspace" onClick={onNew} icon={Plus} />
-        <IconButton title="Clone workspace" onClick={onClone} icon={Copy} disabled={!activeWorkspaceId} />
-        <IconButton title="Rename workspace" onClick={onRename} icon={Pencil} disabled={!activeWorkspaceId} />
-        <IconButton title="Delete workspace" onClick={onDelete} icon={Trash2} disabled={workspaces.length <= 1} />
+        <IconButton title="新建工作区" onClick={onNew} icon={Plus} />
+        <IconButton title="复制工作区" onClick={onClone} icon={Copy} disabled={!activeWorkspaceId} />
+        <IconButton title="重命名工作区" onClick={onRename} icon={Pencil} disabled={!activeWorkspaceId} />
+        <IconButton title="删除工作区" onClick={onDelete} icon={Trash2} disabled={workspaces.length <= 1} />
       </div>
     </nav>
+  );
+}
+
+function WindowControls({ api }: { api: SpaceApi }) {
+  return (
+    <div className="window-controls" aria-label="窗口控制">
+      <button type="button" title="最小化" aria-label="最小化" onClick={() => void api.minimizeWindow?.()}>
+        <Minimize2 size={14} />
+      </button>
+      <button type="button" title="最大化/还原" aria-label="最大化/还原" onClick={() => void api.toggleMaximizeWindow?.()}>
+        <Maximize2 size={14} />
+      </button>
+      <button type="button" title="关闭" aria-label="关闭" className="window-close" onClick={() => void api.closeWindow?.()}>
+        <X size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -2602,12 +3086,107 @@ function SidebarItem({ location, onOpen }: { location: KnownLocation; onOpen: (p
   );
 }
 
+function DriveSidebarItem({ drive, onOpen }: { drive: DriveInfo; onOpen: (path: string) => void }) {
+  const hasUsage = typeof drive.totalBytes === "number" && drive.totalBytes > 0 && typeof drive.freeBytes === "number";
+  const usedBytes = hasUsage ? Math.max(0, (drive.totalBytes ?? 0) - (drive.freeBytes ?? 0)) : 0;
+  const usagePercent = hasUsage ? Math.max(0, Math.min(100, (usedBytes / (drive.totalBytes ?? 1)) * 100)) : 0;
+  const displayName = drive.label && drive.label !== drive.name ? `${drive.label} (${drive.name})` : drive.name;
+  const usageLabel = hasUsage ? `${formatBytes(usedBytes)} / ${formatBytes(drive.totalBytes ?? 0)} 已用` : drive.path;
+
+  return (
+    <button className="sidebar-item drive-item" title={`${displayName} ${drive.path}`} onClick={() => onOpen(drive.path)}>
+      <HardDrive size={16} />
+      <span>{displayName}</span>
+      <small>{usageLabel}</small>
+      <span className="drive-progress" aria-label={`${displayName} 占用 ${Math.round(usagePercent)}%`}>
+        <span style={{ width: `${usagePercent}%` }} />
+      </span>
+    </button>
+  );
+}
+
+function fileExtensionFromName(name: string): string {
+  const index = name.lastIndexOf(".");
+  return index > 0 ? name.slice(index).toLowerCase() : "";
+}
+
+function FileIcon({
+  entry,
+  size = 16
+}: {
+  entry: Pick<FileEntry, "isDirectory" | "name" | "extension"> & Partial<Pick<FileEntry, "isSymlink">>;
+  size?: number;
+}) {
+  if (entry.isDirectory) return <Folder className="file-glyph folder" size={size} />;
+  if (entry.isSymlink) return <ExternalLink className="file-glyph shortcut" size={size} />;
+  const name = entry.name.toLowerCase();
+  const extension = (entry.extension || fileExtensionFromName(entry.name)).toLowerCase();
+  const fullExtension = name.endsWith(".tar.gz") ? ".tar.gz" : extension;
+  const archiveExtensions = new Set([".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".tar.gz"]);
+  const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".psd"]);
+  const audioExtensions = new Set([".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"]);
+  const videoExtensions = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".m4v"]);
+  const spreadsheetExtensions = new Set([".xls", ".xlsx", ".xlsm", ".csv", ".tsv", ".ods"]);
+  const documentExtensions = new Set([".txt", ".md", ".doc", ".docx", ".rtf", ".odt", ".pdf"]);
+  const presentationExtensions = new Set([".ppt", ".pptx", ".odp"]);
+  const codeExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".vue", ".py", ".cs", ".cpp", ".c", ".h", ".hpp", ".java", ".go", ".rs", ".lua", ".php", ".rb", ".swift", ".kt", ".css", ".scss", ".less", ".xml", ".html"]);
+  const configExtensions = new Set([".ini", ".cfg", ".conf", ".yaml", ".yml", ".toml", ".env", ".editorconfig"]);
+  const executableExtensions = new Set([".exe", ".msi", ".bat", ".cmd", ".ps1", ".com", ".appx"]);
+  const databaseExtensions = new Set([".db", ".sqlite", ".sqlite3", ".mdb", ".accdb"]);
+
+  let Icon: LucideIcon = File;
+  let kind = "generic";
+  if (archiveExtensions.has(fullExtension)) {
+    Icon = FileArchive;
+    kind = "archive";
+  } else if (imageExtensions.has(extension)) {
+    Icon = FileImage;
+    kind = "image";
+  } else if (audioExtensions.has(extension)) {
+    Icon = Music;
+    kind = "audio";
+  } else if (videoExtensions.has(extension)) {
+    Icon = Film;
+    kind = "video";
+  } else if (spreadsheetExtensions.has(extension)) {
+    Icon = FileSpreadsheet;
+    kind = "spreadsheet";
+  } else if (presentationExtensions.has(extension)) {
+    Icon = Presentation;
+    kind = "presentation";
+  } else if (extension === ".json" || extension === ".jsonc") {
+    Icon = Braces;
+    kind = "json";
+  } else if (databaseExtensions.has(extension)) {
+    Icon = Database;
+    kind = "database";
+  } else if (codeExtensions.has(extension)) {
+    Icon = FileCode;
+    kind = "code";
+  } else if (configExtensions.has(extension)) {
+    Icon = FileCog;
+    kind = "config";
+  } else if (executableExtensions.has(extension)) {
+    Icon = FileBox;
+    kind = "executable";
+  } else if (/^\.\d+$/.test(extension)) {
+    Icon = FileDigit;
+    kind = "numbered";
+  } else if (documentExtensions.has(extension)) {
+    Icon = extension === ".pdf" ? FileType : FileText;
+    kind = extension === ".pdf" ? "pdf" : "document";
+  }
+
+  return <Icon className={`file-glyph ${kind}`} size={size} />;
+}
+
 function ExplorerPane({
   pane,
   entries,
   colorRules,
   addressSuggestions,
   active,
+  dragTarget,
   onActivate,
   onNavigate,
   onBack,
@@ -2619,21 +3198,24 @@ function ExplorerPane({
   onFilterChange,
   onRecursiveChange,
   onSearch,
+  onToggleFilter,
   onSort,
   onViewMode,
   onSelect,
   onOpen,
   onContextMenu,
   onDrop,
+  onPaneDragStart,
+  onPaneMouseDown,
+  onPanePointerDown,
   onDragStart,
-  onCopyTo,
-  onMoveTo
 }: {
   pane: PaneState;
   entries: FileEntry[];
   colorRules: ColorRule[];
   addressSuggestions: PathSuggestion[];
   active: boolean;
+  dragTarget: boolean;
   onActivate: () => void;
   onNavigate: (path: string) => void;
   onBack: () => void;
@@ -2645,15 +3227,17 @@ function ExplorerPane({
   onFilterChange: (value: string) => void;
   onRecursiveChange: (value: boolean) => void;
   onSearch: () => void;
+  onToggleFilter: () => void;
   onSort: (sortKey: SortKey) => void;
   onViewMode: (mode: ViewMode) => void;
   onSelect: (entry: FileEntry, event: React.MouseEvent, entries: FileEntry[]) => void;
   onOpen: (entry: FileEntry) => void;
   onContextMenu: (event: React.MouseEvent, entry?: FileEntry) => void;
   onDrop: (event: React.DragEvent) => void;
+  onPaneDragStart: (event: React.DragEvent) => void;
+  onPaneMouseDown: (event: React.MouseEvent) => void;
+  onPanePointerDown: (event: React.PointerEvent) => void;
   onDragStart: (event: React.DragEvent, entry: FileEntry) => void;
-  onCopyTo: (paneId: number) => void;
-  onMoveTo: (paneId: number) => void;
 }) {
   const canBack = pane.historyIndex > 0;
   const canForward = pane.historyIndex < pane.history.length - 1;
@@ -2661,11 +3245,18 @@ function ExplorerPane({
   const selectedBytes = entries
     .filter((entry) => containsPath(pane.selectedPaths, entry.path))
     .reduce((sum, entry) => sum + entry.size, 0);
+  const pathBreadcrumbs = breadcrumbs(pane.path);
+  const [pathMenuOpen, setPathMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setPathMenuOpen(false);
+  }, [pane.path]);
 
   return (
     <article
-      className={`explorer-pane ${active ? "active" : ""}`}
+      className={`explorer-pane ${active ? "active" : ""} ${dragTarget ? "drop-target" : ""}`}
       aria-label={`Pane ${pane.id}`}
+      data-pane-id={pane.id}
       onClick={onActivate}
       onContextMenu={(event) => onContextMenu(event)}
       onDragOver={(event) => event.preventDefault()}
@@ -2673,57 +3264,114 @@ function ExplorerPane({
     >
       <header className="pane-titlebar">
         <div className="pane-title">
+          <button
+            className="pane-drag-handle"
+            type="button"
+            title={`拖动交换 P${pane.id}`}
+            aria-label={`拖动交换 P${pane.id}`}
+            onDragStart={onPaneDragStart}
+            onMouseDown={onPaneMouseDown}
+            onPointerDown={onPanePointerDown}
+          >
+            <GripVertical size={14} />
+          </button>
           <span className="pane-index">P{pane.id}</span>
           <strong title={pane.path}>{pathName(pane.path)}</strong>
         </div>
+
+        <div className="pane-nav">
+          <IconButton title="后退" icon={ArrowLeft} onClick={onBack} disabled={!canBack} />
+          <IconButton title="前进" icon={ArrowRight} onClick={onForward} disabled={!canForward} />
+          <IconButton title="上一层" icon={ArrowUp} onClick={onUp} />
+        </div>
+
         <div className="pane-tools">
-          <IconButton title="Details view" icon={List} active={pane.viewMode === "details"} onClick={() => onViewMode("details")} />
-          <IconButton title="Icon view" icon={LayoutGrid} active={pane.viewMode === "icons"} onClick={() => onViewMode("icons")} />
-          <IconButton title="Refresh pane" icon={RefreshCcw} onClick={onRefresh} />
+          <IconButton title="过滤/搜索" icon={Search} active={pane.filterVisible || !!pane.filter.trim()} onClick={onToggleFilter} />
+          <IconButton title="详细视图" icon={List} active={pane.viewMode === "details"} onClick={() => onViewMode("details")} />
+          <IconButton title="图标视图" icon={LayoutGrid} active={pane.viewMode === "icons"} onClick={() => onViewMode("icons")} />
+          <IconButton title="刷新窗格" icon={RefreshCcw} onClick={onRefresh} />
+        </div>
+
+        <div
+          className="pane-location"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setPathMenuOpen(false);
+          }}
+        >
+          <div className="path-menu">
+            <button
+              type="button"
+              className="path-menu-trigger"
+              title="打开路径层级"
+              aria-label={`P${pane.id} 路径层级`}
+              aria-expanded={pathMenuOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPathMenuOpen((open) => !open);
+              }}
+            >
+              <Folder size={14} />
+              <span>路径</span>
+            </button>
+            {pathMenuOpen && (
+              <div className="path-menu-list" role="menu" aria-label={`P${pane.id} 路径层级`}>
+                {pathBreadcrumbs.map((part, index) => {
+                  const current = index === pathBreadcrumbs.length - 1;
+                  return (
+                    <button
+                      key={`${part.path}-${index}`}
+                      type="button"
+                      role="menuitem"
+                      className={current ? "active" : ""}
+                      title={part.path}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPathMenuOpen(false);
+                        onNavigate(part.path);
+                      }}
+                    >
+                      <span>{part.label}</span>
+                      <small>{part.path}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <form
+            className="address-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onAddressSubmit();
+            }}
+          >
+            <input
+              aria-label={`P${pane.id} 地址`}
+              value={pane.addressDraft}
+              list={`path-suggestions-${pane.id}`}
+              onChange={(event) => onAddressChange(event.target.value)}
+              spellCheck={false}
+            />
+            <datalist id={`path-suggestions-${pane.id}`}>
+              {addressSuggestions.map((suggestion) => (
+                <option key={suggestion.path} value={suggestion.path}>
+                  {suggestion.isDirectory ? "文件夹" : "文件"} - {suggestion.label}
+                </option>
+              ))}
+            </datalist>
+            <button type="submit" title="转到" aria-label="转到">
+              <ArrowRight size={14} />
+            </button>
+          </form>
         </div>
       </header>
 
-      <div className="pane-nav">
-        <IconButton title="Back" icon={ArrowLeft} onClick={onBack} disabled={!canBack} />
-        <IconButton title="Forward" icon={ArrowRight} onClick={onForward} disabled={!canForward} />
-        <IconButton title="Up" icon={ArrowUp} onClick={onUp} />
-        <div className="breadcrumbs">
-          {breadcrumbs(pane.path).map((part) => (
-            <button key={part.path} title={part.path} onClick={() => onNavigate(part.path)}>
-              {part.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <form
-        className="address-row"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onAddressSubmit();
-        }}
-      >
-        <input
-          value={pane.addressDraft}
-          list={`path-suggestions-${pane.id}`}
-          onChange={(event) => onAddressChange(event.target.value)}
-          spellCheck={false}
-        />
-        <datalist id={`path-suggestions-${pane.id}`}>
-          {addressSuggestions.map((suggestion) => (
-            <option key={suggestion.path} value={suggestion.path}>
-              {suggestion.isDirectory ? "Folder" : "File"} - {suggestion.label}
-            </option>
-          ))}
-        </datalist>
-        <button type="submit">Go</button>
-      </form>
-
-      <div className="search-row">
+      {(pane.filterVisible || pane.filter.trim() || pane.recursiveSearch) && <div className="search-row">
         <Search size={15} />
         <input
           value={pane.filter}
-          placeholder="Filter or search"
+          placeholder="过滤或搜索"
           onChange={(event) => onFilterChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") onSearch();
@@ -2735,31 +3383,12 @@ function ExplorerPane({
             checked={pane.recursiveSearch}
             onChange={(event) => onRecursiveChange(event.target.checked)}
           />
-          Subfolders
+          子文件夹
         </label>
         <button type="button" onClick={onSearch}>
-          Search
+          搜索
         </button>
-      </div>
-
-      <div className="pane-transfer">
-        <span>Copy to</span>
-        {paneIds
-          .filter((id) => id !== pane.id)
-          .map((id) => (
-            <button key={`copy-${id}`} disabled={!selectedCount} onClick={() => onCopyTo(id)}>
-              P{id}
-            </button>
-          ))}
-        <span>Move to</span>
-        {paneIds
-          .filter((id) => id !== pane.id)
-          .map((id) => (
-            <button key={`move-${id}`} disabled={!selectedCount} onClick={() => onMoveTo(id)}>
-              P{id}
-            </button>
-          ))}
-      </div>
+      </div>}
 
       <section className="file-region">
         {pane.viewMode === "details" ? (
@@ -2784,13 +3413,13 @@ function ExplorerPane({
             onDragStart={onDragStart}
           />
         )}
-        {pane.loading && <div className="pane-overlay">Loading...</div>}
+        {pane.loading && <div className="pane-overlay">加载中...</div>}
         {pane.error && <div className="pane-error">{pane.error}</div>}
       </section>
 
       <footer className="pane-status">
-        <span>{entries.length} items</span>
-        <span>{selectedCount ? `${selectedCount} selected, ${formatBytes(selectedBytes)}` : "No selection"}</span>
+        <span>{entries.length} 项</span>
+        <span>{selectedCount ? `已选 ${selectedCount} 项，${formatBytes(selectedBytes)}` : "未选择"}</span>
       </footer>
     </article>
   );
@@ -2842,7 +3471,7 @@ function DetailsList({
               onDragStart={(event) => onDragStart(event, entry)}
             >
               <span className="file-name-cell">
-                {entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
+                <FileIcon entry={entry} size={16} />
                 <span>{entry.name}</span>
               </span>
               <span>{entry.isDirectory ? "" : formatBytes(entry.size)}</span>
@@ -2851,7 +3480,7 @@ function DetailsList({
             </button>
           );
         })}
-        {entries.length === 0 && <div className="empty-folder">No items match this view.</div>}
+        {entries.length === 0 && <div className="empty-folder">没有匹配此视图的项目。</div>}
       </div>
     </div>
   );
@@ -2891,12 +3520,12 @@ function IconGrid({
             onContextMenu={(event) => onContextMenu(event, entry)}
             onDragStart={(event) => onDragStart(event, entry)}
           >
-            {entry.isDirectory ? <Folder size={28} /> : <File size={28} />}
+            <FileIcon entry={entry} size={28} />
             <span>{entry.name}</span>
           </button>
         );
       })}
-      {entries.length === 0 && <div className="empty-folder">No items match this view.</div>}
+      {entries.length === 0 && <div className="empty-folder">没有匹配此视图的项目。</div>}
     </div>
   );
 }
@@ -3013,8 +3642,8 @@ function Inspector({
 
   return (
     <aside className="inspector">
-      <h2>Inspector</h2>
-      {!preview && <p className="empty-note">Select a file to preview details.</p>}
+      <h2>检查器</h2>
+      {!preview && <p className="empty-note">选择文件后预览详情。</p>}
       {preview && (
         <>
           <div className="preview-card">
@@ -3093,7 +3722,7 @@ function HashCompareModal({
 
   async function calculate() {
     if (files.length === 0) {
-      setError("Select one or more files to compare.");
+      setError("请选择一个或多个文件进行对比。");
       return;
     }
     setLoading(true);
@@ -3121,18 +3750,18 @@ function HashCompareModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal hash-compare-modal" role="dialog" aria-modal="true" aria-label="Hash compare">
+      <section className="modal hash-compare-modal" role="dialog" aria-modal="true" aria-label="哈希对比">
         <header className="modal-header">
           <div>
-            <h2>Hash Compare</h2>
-            <span>{files.length} selected file(s)</span>
+            <h2>哈希对比</h2>
+            <span>{files.length} 个已选文件</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <div className="hash-compare-toolbar">
           <label>
-            Algorithm
+            算法
             <select value={algorithm} onChange={(event) => setAlgorithm(event.target.value as HashAlgorithm)}>
               {hashAlgorithms.map((item) => (
                 <option key={item} value={item}>
@@ -3142,25 +3771,25 @@ function HashCompareModal({
             </select>
           </label>
           <button className="primary" onClick={() => void calculate()} disabled={loading || files.length === 0}>
-            Calculate
+            计算
           </button>
           <span>
             {loading
-              ? "Calculating..."
+              ? "计算中..."
               : calculated
-                ? `${duplicateGroups.length} matching group(s) · ${uniqueGroups.length} unique file(s)`
-                : "Ready"}
+                ? `${duplicateGroups.length} 组相同 · ${uniqueGroups.length} 个唯一文件`
+                : "待计算"}
           </span>
         </div>
 
         {error && <p className="modal-error">{error}</p>}
 
         <div className="hash-compare-results">
-          {!calculated && <p className="empty-folder">Choose an algorithm and calculate selected file hashes.</p>}
+          {!calculated && <p className="empty-folder">选择算法后计算所选文件哈希。</p>}
           {duplicateGroups.map((group) => (
             <section className="hash-group duplicate" key={group.value}>
               <div className="hash-group-header">
-                <strong>{group.items.length} matching files</strong>
+                <strong>{group.items.length} 个相同文件</strong>
                 <code>{group.value}</code>
               </div>
               {group.items.map((result) => (
@@ -3171,7 +3800,7 @@ function HashCompareModal({
           {uniqueGroups.length > 0 && (
             <section className="hash-group">
               <div className="hash-group-header">
-                <strong>{uniqueGroups.length} unique file(s)</strong>
+                <strong>{uniqueGroups.length} 个唯一文件</strong>
                 <span>{algorithm.toUpperCase()}</span>
               </div>
               {uniqueGroups.map((group) => (
@@ -3182,8 +3811,8 @@ function HashCompareModal({
           {failedResults.length > 0 && (
             <section className="hash-group failed">
               <div className="hash-group-header">
-                <strong>{failedResults.length} failed item(s)</strong>
-                <span>Skipped</span>
+                <strong>{failedResults.length} 个失败项</strong>
+                <span>已跳过</span>
               </div>
               {failedResults.map((result) => (
                 <HashCompareRow key={result.entry.path} result={result} />
@@ -3312,24 +3941,24 @@ function ArchiveBrowserModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal archive-modal" role="dialog" aria-modal="true" aria-label="Archive browser">
+      <section className="modal archive-modal" role="dialog" aria-modal="true" aria-label="归档浏览器">
         <header className="modal-header">
           <div>
             <h2>{pathName(archivePath)}</h2>
-            <span>{internalPath || "Archive root"}</span>
+            <span>{internalPath || "归档根目录"}</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <div className="archive-toolbar">
           <button onClick={goUp} disabled={!internalPath}>
-            Up
+            上一级
           </button>
           <button onClick={() => void extractSelected(false)} disabled={!selectedPaths.length}>
-            Extract Selected
+            解压所选
           </button>
-          <button onClick={() => void extractSelected(true)}>Extract All</button>
-          <span title={destinationPath}>Destination: {destinationPath}</span>
+          <button onClick={() => void extractSelected(true)}>全部解压</button>
+          <span title={destinationPath}>目标：{destinationPath}</span>
         </div>
 
         {error && <p className="modal-error">{error}</p>}
@@ -3337,9 +3966,9 @@ function ArchiveBrowserModal({
         <div className="archive-body">
           <div className="archive-list">
             <div className="preview-header archive-header">
-              <span>Name</span>
-              <span>Size</span>
-              <span>Modified</span>
+              <span>名称</span>
+              <span>大小</span>
+              <span>修改时间</span>
             </div>
             {entries.map((entry) => (
               <button
@@ -3356,12 +3985,12 @@ function ArchiveBrowserModal({
                 <span>{formatDate(entry.modifiedAt)}</span>
               </button>
             ))}
-            {loading && <div className="empty-folder">Loading archive...</div>}
-            {!loading && entries.length === 0 && <div className="empty-folder">Archive folder is empty.</div>}
+            {loading && <div className="empty-folder">正在读取归档...</div>}
+            {!loading && entries.length === 0 && <div className="empty-folder">归档目录为空。</div>}
           </div>
 
           <div className="archive-preview">
-            {!preview && <p className="empty-note">Select an archive entry to preview it.</p>}
+            {!preview && <p className="empty-note">选择归档条目预览。</p>}
             {preview?.kind === "image" && preview.dataUrl && <img src={preview.dataUrl} alt={preview.name} />}
             {preview?.kind === "text" && <pre>{preview.text}</pre>}
             {preview && preview.kind !== "image" && preview.kind !== "text" && (
@@ -3411,17 +4040,17 @@ function NewFileModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal new-file-modal" role="dialog" aria-modal="true" aria-label="New file">
+      <section className="modal new-file-modal" role="dialog" aria-modal="true" aria-label="新建文件">
         <header className="modal-header">
           <div>
-            <h2>New File</h2>
+            <h2>新建文件</h2>
             <span title={destinationPath}>{destinationPath}</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <div className="new-file-body">
-          <div className="template-list" aria-label="File templates">
+          <div className="template-list" aria-label="文件模板">
             {templates.map((template) => (
               <button
                 key={template.id}
@@ -3436,15 +4065,15 @@ function NewFileModal({
 
           <div className="template-editor">
             <label>
-              Name
+              文件名
               <input value={fileName} onChange={(event) => setFileName(event.target.value)} spellCheck={false} />
             </label>
             <label>
-              Preview
+              预览
               <input value={previewName} readOnly spellCheck={false} />
             </label>
             <label className="template-content-label">
-              Content
+              内容
               <textarea value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} />
             </label>
             <label className="check-row">
@@ -3453,11 +4082,11 @@ function NewFileModal({
                 checked={saveAsTemplate}
                 onChange={(event) => setSaveAsTemplate(event.target.checked)}
               />
-              Save as template
+              保存为模板
             </label>
             {saveAsTemplate && (
               <label>
-                Template name
+                模板名称
                 <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
               </label>
             )}
@@ -3465,7 +4094,7 @@ function NewFileModal({
         </div>
 
         <footer className="modal-footer">
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose}>取消</button>
           <button
             disabled={!canDeleteTemplate}
             onClick={() => {
@@ -3474,14 +4103,14 @@ function NewFileModal({
               if (templates[0]) chooseTemplate(templates[0].id);
             }}
           >
-            Delete Template
+            删除模板
           </button>
           <button
             className="primary"
             disabled={!fileName.trim()}
             onClick={() => onCreate({ name: fileName, content, saveTemplateName: saveAsTemplate ? templateName : undefined })}
           >
-            Create
+            创建
           </button>
         </footer>
       </section>
@@ -3489,158 +4118,49 @@ function NewFileModal({
   );
 }
 
-function WorkspaceSearchModal({
-  api,
-  panes,
-  activePaneId,
+function WorkspaceRenameModal({
+  workspace,
   onClose,
-  onOpen,
-  onReveal,
-  onAddToShelf
+  onSave
 }: {
-  api: SpaceApi;
-  panes: PaneState[];
-  activePaneId: number;
+  workspace: WorkspaceRecord;
   onClose: () => void;
-  onOpen: (entry: FileEntry) => void;
-  onReveal: (entry: FileEntry) => void;
-  onAddToShelf: (entry: FileEntry) => void;
+  onSave: (name: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [recursive, setRecursive] = useState(true);
-  const [results, setResults] = useState<WorkspaceSearchResult[]>([]);
-  const [searched, setSearched] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const roots = useMemo(() => {
-    const seen = new Set<string>();
-    return panes.filter((pane) => {
-      const key = pane.path.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [panes]);
-
-  async function runWorkspaceSearch() {
-    const searchQuery = query.trim();
-    if (!searchQuery) {
-      setError("Enter a search term.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    setSearched(true);
-    try {
-      const perRootLimit = Math.max(50, Math.floor(500 / Math.max(roots.length, 1)));
-      const responses = await Promise.all(
-        roots.map(async (pane) => ({
-          pane,
-          entries: await api.searchFiles({
-            rootPath: pane.path,
-            query: searchQuery,
-            recursive,
-            limit: perRootLimit
-          })
-        }))
-      );
-      const resultMap = new Map<string, WorkspaceSearchResult>();
-      for (const response of responses) {
-        const sourceLabel = `P${response.pane.id} ${pathName(response.pane.path)}`;
-        for (const entry of response.entries) {
-          const key = entry.path.toLowerCase();
-          const existing = resultMap.get(key);
-          if (existing) {
-            if (!existing.sourceLabels.includes(sourceLabel)) existing.sourceLabels.push(sourceLabel);
-          } else {
-            resultMap.set(key, { entry, sourceLabels: [sourceLabel] });
-          }
-        }
-      }
-      setResults(
-        [...resultMap.values()]
-          .sort((a, b) => a.entry.name.localeCompare(b.entry.name, undefined, { sensitivity: "base", numeric: true }))
-          .slice(0, 500)
-      );
-    } catch (caught) {
-      setError(getErrorMessage(caught));
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [name, setName] = useState(workspace.name);
+  const trimmedName = name.trim();
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal workspace-search-modal" role="dialog" aria-modal="true" aria-label="Workspace search">
+      <section className="modal workspace-rename-modal" role="dialog" aria-modal="true" aria-label="重命名工作区">
         <header className="modal-header">
           <div>
-            <h2>Workspace Search</h2>
-            <span>{roots.length} pane root(s)</span>
+            <h2>重命名工作区</h2>
+            <span>{workspace.name}</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <form
-          className="workspace-search-form"
+          className="workspace-rename-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void runWorkspaceSearch();
+            if (trimmedName) onSave(trimmedName);
           }}
         >
           <label>
-            Query
-            <input value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
+            工作区名称
+            <input value={name} autoFocus onChange={(event) => setName(event.target.value)} spellCheck={false} />
           </label>
-          <label className="check-row">
-            <input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} />
-            Subfolders
-          </label>
-          <button className="primary" type="submit" disabled={loading}>
-            Search
-          </button>
+          <footer className="modal-footer">
+            <button type="button" onClick={onClose}>
+              取消
+            </button>
+            <button className="primary" type="submit" disabled={!trimmedName}>
+              保存
+            </button>
+          </footer>
         </form>
-
-        <div className="workspace-search-roots">
-          {roots.map((pane) => (
-            <span key={pane.id} className={pane.id === activePaneId ? "active" : ""} title={pane.path}>
-              P{pane.id}: {pathName(pane.path)}
-            </span>
-          ))}
-        </div>
-
-        {error && <p className="modal-error">{error}</p>}
-        <div className="workspace-search-summary">
-          {loading ? "Searching..." : searched ? `${results.length} result(s)` : "Ready"}
-        </div>
-
-        <div className="workspace-search-results">
-          <div className="workspace-search-header">
-            <span>Name</span>
-            <span>Size</span>
-            <span>Found In</span>
-            <span>Actions</span>
-          </div>
-          {results.map((result) => (
-            <div className="workspace-search-row" key={result.entry.path}>
-              <button className="workspace-search-file" onClick={() => onOpen(result.entry)}>
-                {result.entry.isDirectory ? <Folder size={16} /> : <File size={16} />}
-                <span>
-                  <strong>{result.entry.name}</strong>
-                  <small title={result.entry.path}>{result.entry.parentPath}</small>
-                </span>
-              </button>
-              <span>{result.entry.isDirectory ? "" : formatBytes(result.entry.size)}</span>
-              <span title={result.sourceLabels.join(", ")}>{result.sourceLabels.join(", ")}</span>
-              <div className="workspace-search-actions">
-                <button onClick={() => onOpen(result.entry)}>Open {result.entry.name}</button>
-                <button onClick={() => onReveal(result.entry)}>Reveal {result.entry.name}</button>
-                <button onClick={() => onAddToShelf(result.entry)}>Shelf {result.entry.name}</button>
-              </div>
-            </div>
-          ))}
-          {!loading && searched && results.length === 0 && <div className="empty-folder">No matches found.</div>}
-        </div>
       </section>
     </div>
   );
@@ -3693,7 +4213,7 @@ function ColorRulesModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal color-rules-modal" role="dialog" aria-modal="true" aria-label="Color rules">
+      <section className="modal color-rules-modal" role="dialog" aria-modal="true" aria-label="颜色规则">
         <header className="modal-header">
           <div>
             <h2>Color Rules</h2>
@@ -3879,7 +4399,6 @@ function ActionSettingsModal({
   onSave: (toolbarIds: string[], contextMenuIds: string[], hotkeyBindings: HotkeyBinding[]) => void;
 }) {
   const [draftToolbarIds, setDraftToolbarIds] = useState(() => normalizeActionIds(toolbarIds, defaultToolbarActionIds, toolbarActionCatalog));
-  const [draftContextIds, setDraftContextIds] = useState(() => normalizeActionIds(contextMenuIds, defaultContextMenuActionIds, contextMenuActionCatalog));
   const [draftHotkeys, setDraftHotkeys] = useState<Record<string, string>>(() => {
     const entries = normalizeHotkeyBindings(hotkeyBindings).map((binding) => [binding.actionId, binding.shortcut]);
     return Object.fromEntries(entries);
@@ -3897,34 +4416,28 @@ function ActionSettingsModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal action-settings-modal" role="dialog" aria-modal="true" aria-label="Customize actions">
+      <section className="modal action-settings-modal" role="dialog" aria-modal="true" aria-label="自定义动作">
         <header className="modal-header">
           <div>
-            <h2>Customize Actions</h2>
-            <span>Choose and arrange workspace toolbar and context menu actions.</span>
+            <h2>自定义动作</h2>
+            <span>调整工具栏按钮和快捷键；右键菜单固定使用 Space 分组菜单。</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <div className="action-settings-body">
           <ActionSurfaceEditor
-            title="Toolbar"
+            title="工具栏"
             catalog={toolbarActionCatalog}
             selectedIds={draftToolbarIds}
             onChange={setDraftToolbarIds}
-          />
-          <ActionSurfaceEditor
-            title="Context Menu"
-            catalog={contextMenuActionCatalog}
-            selectedIds={draftContextIds}
-            onChange={setDraftContextIds}
           />
           <HotkeyEditor catalog={hotkeyActionCatalog} values={draftHotkeys} onChange={setDraftHotkeys} />
         </div>
         {(duplicateHotkeys.length > 0 || invalidHotkeys.length > 0) && (
           <div className="action-settings-warning" role="alert">
-            {duplicateHotkeys.length > 0 && <span>Duplicate shortcuts: {[...new Set(duplicateHotkeys)].join(", ")}</span>}
-            {invalidHotkeys.length > 0 && <span>Invalid shortcuts: {invalidHotkeys.join(", ")}</span>}
+            {duplicateHotkeys.length > 0 && <span>快捷键重复：{[...new Set(duplicateHotkeys)].join(", ")}</span>}
+            {invalidHotkeys.length > 0 && <span>快捷键无效：{invalidHotkeys.join(", ")}</span>}
           </div>
         )}
 
@@ -3932,15 +4445,14 @@ function ActionSettingsModal({
           <button
             onClick={() => {
               setDraftToolbarIds(defaultToolbarActionIds);
-              setDraftContextIds(defaultContextMenuActionIds);
               setDraftHotkeys({});
             }}
           >
-            Restore Defaults
+            恢复默认
           </button>
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={!canSave} onClick={() => onSave(draftToolbarIds, draftContextIds, normalizeHotkeyBindings(normalizedHotkeys))}>
-            Save Settings
+          <button onClick={onClose}>取消</button>
+          <button className="primary" disabled={!canSave} onClick={() => onSave(draftToolbarIds, contextMenuIds, normalizeHotkeyBindings(normalizedHotkeys))}>
+            保存设置
           </button>
         </footer>
       </section>
@@ -3959,7 +4471,7 @@ function HotkeyEditor({
 }) {
   return (
     <fieldset className="hotkey-editor">
-      <legend>Hotkeys</legend>
+      <legend>快捷键</legend>
       {catalog.map((item) => {
         const value = values[item.id] ?? "";
         const normalized = normalizeShortcut(value);
@@ -4017,10 +4529,10 @@ function ActionSurfaceEditor({
             </label>
             <div className="action-row-buttons">
               <button disabled={!enabled || index <= 0} onClick={() => onChange(moveActionId(selectedIds, item.id, -1))}>
-                Up
+                上移
               </button>
               <button disabled={!enabled || index === selectedIds.length - 1} onClick={() => onChange(moveActionId(selectedIds, item.id, 1))}>
-                Down
+                下移
               </button>
             </div>
           </div>
@@ -4151,10 +4663,10 @@ function BatchRenameModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal rename-modal" role="dialog" aria-modal="true" aria-label="Batch rename">
+      <section className="modal rename-modal" role="dialog" aria-modal="true" aria-label="批量重命名">
         <header className="modal-header">
           <div>
-            <h2>Batch Rename</h2>
+            <h2>批量重命名</h2>
             <span>{paths.length} selected item(s)</span>
           </div>
           <button onClick={onClose}>Close</button>
@@ -4464,20 +4976,20 @@ function FolderSyncModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal sync-modal" role="dialog" aria-modal="true" aria-label="Folder sync">
+      <section className="modal sync-modal" role="dialog" aria-modal="true" aria-label="文件夹同步">
         <header className="modal-header">
           <div>
-            <h2>Folder Sync</h2>
-            <span>Compare two panes and copy newer or missing files.</span>
+            <h2>文件夹同步</h2>
+            <span>比较两个窗格，并复制较新或缺失的文件。</span>
           </div>
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </header>
 
         <div className="sync-preset-bar">
           <label>
-            Preset
+            预设
             <select value={selectedPresetId} onChange={(event) => loadPreset(event.target.value)}>
-              <option value="">Custom sync</option>
+              <option value="">自定义同步</option>
               {presets.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.name}
@@ -4486,22 +4998,22 @@ function FolderSyncModal({
             </select>
           </label>
           <label>
-            Preset name
+            预设名称
             <input
               value={presetName}
-              placeholder="Reusable sync name"
+              placeholder="可复用同步名称"
               onChange={(event) => setPresetName(event.target.value)}
             />
           </label>
-          <button onClick={savePreset}>Save Preset</button>
+          <button onClick={savePreset}>保存预设</button>
           <button disabled={!selectedPresetId} onClick={deletePreset}>
-            Delete Preset
+            删除预设
           </button>
         </div>
 
         <div className="sync-form">
           <label>
-            Left
+            左侧窗格
             <select value={leftPaneId} onChange={(event) => selectPane("left", Number(event.target.value))}>
               {panes.map((pane) => (
                 <option key={pane.id} value={pane.id}>
@@ -4511,7 +5023,7 @@ function FolderSyncModal({
             </select>
           </label>
           <label>
-            Right
+            右侧窗格
             <select value={rightPaneId} onChange={(event) => selectPane("right", Number(event.target.value))}>
               {panes.map((pane) => (
                 <option key={pane.id} value={pane.id}>
@@ -4521,132 +5033,66 @@ function FolderSyncModal({
             </select>
           </label>
           <label>
-            Left path
+            左侧路径
             <input value={leftPath} onChange={(event) => setLeftPath(event.target.value)} />
           </label>
           <label>
-            Right path
+            右侧路径
             <input value={rightPath} onChange={(event) => setRightPath(event.target.value)} />
           </label>
           <label>
-            Direction
+            同步方向
             <select value={direction} onChange={(event) => setDirection(event.target.value as FolderSyncDirection)}>
-              <option value="updateRight">Update right from left</option>
-              <option value="updateLeft">Update left from right</option>
-              <option value="updateBoth">Update both</option>
+              <option value="updateRight">用左侧更新右侧</option>
+              <option value="updateLeft">用右侧更新左侧</option>
+              <option value="updateBoth">双向更新</option>
             </select>
           </label>
           <label>
-            Filter
-            <input value={filter} placeholder="Optional path text" onChange={(event) => setFilter(event.target.value)} />
+            过滤
+            <input value={filter} placeholder="可选路径文本" onChange={(event) => setFilter(event.target.value)} />
           </label>
           <label className="check-row">
             <input type="checkbox" checked={includeHidden} onChange={(event) => setIncludeHidden(event.target.checked)} />
-            Include hidden items
+            包含隐藏项目
           </label>
         </div>
 
-        {sameFolder && <p className="modal-error">Choose two different folders.</p>}
+        {sameFolder && <p className="modal-error">请选择两个不同文件夹。</p>}
         {error && <p className="modal-error">{error}</p>}
 
         <div className="sync-summary">
-          <span>{plan?.actions.length ?? 0} action(s)</span>
-          <span>{plan?.skipped ?? 0} skipped</span>
+          <span>{plan?.actions.length ?? 0} 项操作</span>
+          <span>{plan?.skipped ?? 0} 项已跳过</span>
         </div>
 
         <div className="preview-table">
           <div className="preview-header sync-header">
-            <span>Action</span>
-            <span>Path</span>
-            <span>Reason</span>
+            <span>操作</span>
+            <span>路径</span>
+            <span>原因</span>
           </div>
           {plan?.actions.slice(0, 200).map((action) => (
             <div key={`${action.type}-${action.relativePath}`} className="preview-row sync-row">
-              <span>{action.type === "copyLeftToRight" ? "Left -> Right" : "Right -> Left"}</span>
+              <span>{action.type === "copyLeftToRight" ? "左 -> 右" : "右 -> 左"}</span>
               <span title={action.relativePath}>{action.relativePath}</span>
               <span>{action.reason}, {formatBytes(action.size)}</span>
             </div>
           ))}
-          {plan && plan.actions.length > 200 && <p className="modal-help">Showing first 200 actions.</p>}
+          {plan && plan.actions.length > 200 && <p className="modal-help">仅显示前 200 项操作。</p>}
         </div>
 
         <footer className="modal-footer">
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose}>取消</button>
           <button
             className="primary"
             disabled={!plan || plan.actions.length === 0 || sameFolder}
             onClick={() => onApply({ ...currentSettings(), refreshPaneIds: refreshPaneIds() })}
           >
-            Sync
+            执行同步
           </button>
         </footer>
       </section>
-    </div>
-  );
-}
-
-function ContextMenu({
-  state,
-  actionIds,
-  onCopy,
-  onCopyPaths,
-  onSelectSameType,
-  onCut,
-  onPaste,
-  onRename,
-  onDelete,
-  onHash,
-  onAddToShelf,
-  onReveal,
-  onOpenTerminal,
-  onQuickLaunch,
-  canPaste,
-  canAct,
-  canSelectSameType
-}: {
-  state: ContextMenuState;
-  actionIds: string[];
-  onCopy: () => void;
-  onCopyPaths: () => void;
-  onSelectSameType: () => void;
-  onCut: () => void;
-  onPaste: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-  onHash: () => void;
-  onAddToShelf: () => void;
-  onReveal: () => void;
-  onOpenTerminal: () => void;
-  onQuickLaunch: () => void;
-  canPaste: boolean;
-  canAct: boolean;
-  canSelectSameType: boolean;
-}) {
-  const actions: Record<string, { label: string; disabled?: boolean; onClick: () => void }> = {
-    copy: { label: "Copy", disabled: !canAct, onClick: onCopy },
-    copyPaths: { label: "Copy paths", disabled: !canAct, onClick: onCopyPaths },
-    selectSameType: { label: "Select same type", disabled: !canSelectSameType, onClick: onSelectSameType },
-    cut: { label: "Cut", disabled: !canAct, onClick: onCut },
-    paste: { label: `Paste into Pane ${state.paneId}`, disabled: !canPaste, onClick: onPaste },
-    rename: { label: "Rename", disabled: !canAct, onClick: onRename },
-    delete: { label: "Delete", disabled: !canAct, onClick: onDelete },
-    hash: { label: "Calculate SHA-256", disabled: !canAct, onClick: onHash },
-    addShelf: { label: "Add to Shelf", disabled: !canAct, onClick: onAddToShelf },
-    quickLaunch: { label: "Quick Launch...", onClick: onQuickLaunch },
-    terminal: { label: "Open Terminal", onClick: onOpenTerminal },
-    reveal: { label: "Reveal in Explorer", disabled: !canAct, onClick: onReveal }
-  };
-  return (
-    <div className="context-menu" style={{ left: state.x, top: state.y }}>
-      {actionIds.map((actionId) => {
-        const action = actions[actionId];
-        if (!action) return null;
-        return (
-          <button key={actionId} disabled={action.disabled} onClick={action.onClick}>
-            {action.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -4656,13 +5102,15 @@ function IconButton({
   icon: Icon,
   onClick,
   disabled,
-  active
+  active,
+  showLabel = false
 }: {
   title: string;
   icon: LucideIcon;
   onClick: () => void;
   disabled?: boolean;
   active?: boolean;
+  showLabel?: boolean;
 }) {
   return (
     <button
@@ -4677,6 +5125,7 @@ function IconButton({
       disabled={disabled}
     >
       <Icon size={16} />
+      {showLabel && <span className="icon-button-label">{title}</span>}
     </button>
   );
 }

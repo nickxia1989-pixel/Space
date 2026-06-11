@@ -22,7 +22,9 @@ import {
   previewPath,
   renameItem,
   runQuickLaunch,
+  runSvnCommand,
   searchFiles,
+  showSystemContextMenu,
   suggestPaths
 } from "./fileService.js";
 import { WorkspaceStore } from "./workspaceStore.js";
@@ -41,6 +43,8 @@ import type {
   QuickLaunchRunRequest,
   RenameRequest,
   SearchOptions,
+  SvnCommandRequest,
+  SystemContextMenuRequest,
   WorkspaceDocument
 } from "../src/shared.js";
 
@@ -60,7 +64,46 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
           const appShell = document.querySelector(".app-shell");
           const bodyText = document.body?.innerText?.trim() ?? "";
           if (appShell && paneCount === 4) {
-            resolve({ ok: true, paneCount, bodyText: bodyText.slice(0, 240) });
+            const toolbarButtons = Array.from(document.querySelectorAll('.toolbar .icon-button'));
+            const toolbarLabels = toolbarButtons.map((button) => ({
+              aria: button.getAttribute('aria-label') ?? '',
+              text: button.textContent?.trim() ?? ''
+            }));
+            const retiredButtons = ['批量重命名', '颜色规则', '快速启动', '工作区搜索'].filter((label) =>
+              document.querySelector('.toolbar [aria-label="' + label + '"]')
+            );
+            const breadcrumbCounts = Array.from(document.querySelectorAll('.explorer-pane .breadcrumbs')).map(
+              (node) => node.querySelectorAll('button').length
+            );
+            const newFileButton = document.querySelector('.toolbar [aria-label="新建文件"]');
+            newFileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            window.setTimeout(() => {
+              const templateText = Array.from(document.querySelectorAll('.new-file-modal .template-list button')).map(
+                (button) => button.textContent?.trim() ?? ''
+              );
+              const requiredTemplates = ['空白文本', 'Markdown 笔记', 'Word 文档', 'Excel 工作簿', 'PowerPoint 演示文稿'];
+              const missingTemplates = requiredTemplates.filter((label) => !templateText.some((text) => text.includes(label)));
+              const retiredTemplates = ['JSON', 'PowerShell 脚本', 'HTML 页面'].filter((label) =>
+                templateText.some((text) => text.includes(label))
+              );
+              const failures = [
+                toolbarLabels.some((button) => !button.text) ? 'toolbar buttons need text labels' : '',
+                retiredButtons.length ? 'retired toolbar buttons still visible: ' + retiredButtons.join(', ') : '',
+                toolbarLabels.some((button) => button.aria === 'Windows Terminal') ? '' : 'Windows Terminal toolbar button missing',
+                breadcrumbCounts.some((count) => count > 3) ? 'breadcrumbs are not compact' : '',
+                missingTemplates.length ? 'missing templates: ' + missingTemplates.join(', ') : '',
+                retiredTemplates.length ? 'retired templates still visible: ' + retiredTemplates.join(', ') : ''
+              ].filter(Boolean);
+              resolve({
+                ok: failures.length === 0,
+                paneCount,
+                toolbarLabels,
+                breadcrumbCounts,
+                templateText,
+                failures,
+                bodyText: bodyText.slice(0, 240)
+              });
+            }, 120);
             return;
           }
           if (Date.now() - startedAt > 8000) {
@@ -77,7 +120,7 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
         };
         check();
       })`
-    )) as { ok: boolean; paneCount: number; rootChildren?: number; bodyText?: string; scripts?: string[] };
+    )) as { ok: boolean; paneCount: number; rootChildren?: number; bodyText?: string; scripts?: string[]; failures?: string[] };
     if (!result.ok) {
       console.error(`Smoke check failed: ${JSON.stringify(result)}`);
       app.exit(1);
@@ -100,7 +143,9 @@ function createWindow(): void {
     minHeight: 720,
     title: "Space",
     icon: path.join(__dirname, "../../assets/icon.ico"),
-    backgroundColor: "#101217",
+    backgroundColor: "#f6f8fb",
+    frame: false,
+    autoHideMenuBar: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -168,8 +213,28 @@ function registerIpc(): void {
     return { ok: true, message: "Copied to clipboard." };
   });
   ipcMain.handle("space:run-quick-launch", (_event, request: QuickLaunchRunRequest) => runQuickLaunch(request));
+  ipcMain.handle("space:svn-command", (_event, request: SvnCommandRequest) => runSvnCommand(request));
+  ipcMain.handle("space:show-system-context-menu", (_event, request: SystemContextMenuRequest) => showSystemContextMenu(request));
   ipcMain.handle("space:get-workspace", () => workspaceStore.read());
   ipcMain.handle("space:save-workspace", (_event, snapshot: WorkspaceDocument) => workspaceStore.write(snapshot));
+  ipcMain.handle("space:window-minimize", () => {
+    BrowserWindow.getFocusedWindow()?.minimize();
+    return { ok: true, message: "Window minimized." };
+  });
+  ipcMain.handle("space:window-toggle-maximize", () => {
+    const window = BrowserWindow.getFocusedWindow();
+    if (!window) return { ok: false, message: "Window not found." };
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+    return { ok: true, message: "Window toggled." };
+  });
+  ipcMain.handle("space:window-close", () => {
+    BrowserWindow.getFocusedWindow()?.close();
+    return { ok: true, message: "Window closed." };
+  });
 }
 
 app.whenReady().then(() => {

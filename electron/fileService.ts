@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import JSZip from "jszip";
 import os from "node:os";
@@ -37,11 +37,14 @@ import type {
   PreviewPayload,
   QuickLaunchRunRequest,
   RenameRequest,
-  SearchOptions
+  SearchOptions,
+  SvnCommandRequest,
+  SystemContextMenuRequest
 } from "../src/shared.js";
 
 const fsp = fs.promises;
 const gunzipAsync = promisify(gunzip);
+const execFileAsync = promisify(execFile);
 const TEXT_EXTENSIONS = new Set([
   ".bat",
   ".cmd",
@@ -110,10 +113,10 @@ export async function getFileEntry(targetPath: string): Promise<FileEntry> {
 }
 
 function getTypeLabel(stats: fs.Stats, extension: string): string {
-  if (stats.isDirectory()) return "Folder";
-  if (stats.isSymbolicLink()) return "Link";
-  if (extension) return `${extension.slice(1).toUpperCase()} File`;
-  return "File";
+  if (stats.isDirectory()) return "文件夹";
+  if (stats.isSymbolicLink()) return "链接";
+  if (extension) return `${extension.slice(1).toUpperCase()} 文件`;
+  return "文件";
 }
 
 export function sortEntries(
@@ -156,14 +159,20 @@ export async function listDirectory(directoryPath: string): Promise<DirectoryPay
 
 export async function listDrives(): Promise<DriveInfo[]> {
   if (process.platform !== "win32") {
-    return [{ name: "/", path: "/" }];
+    const usage = await getDiskUsage("/");
+    return [{ name: "/", path: "/", label: "文件系统", ...usage }];
   }
 
-  const checks = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(async (letter) => {
+  const powershellDrives = await listWindowsDrivesFromPowerShell();
+  if (powershellDrives.length > 0) {
+    return powershellDrives;
+  }
+
+  const checks = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(async (letter): Promise<DriveInfo | null> => {
     const rootPath = `${letter}:\\`;
     try {
       await fsp.access(rootPath);
-      return { name: `${letter}:`, path: rootPath };
+      return { name: `${letter}:`, path: rootPath, label: "本地磁盘", ...(await getDiskUsage(rootPath)) };
     } catch {
       return null;
     }
@@ -173,21 +182,166 @@ export async function listDrives(): Promise<DriveInfo[]> {
 }
 
 export async function getKnownLocations(): Promise<KnownLocation[]> {
+  if (process.platform === "win32") {
+    const quickAccessLocations = await getWindowsQuickAccessLocations();
+    if (quickAccessLocations.length > 0) return quickAccessLocations;
+  }
+
   const homePath = os.homedir();
   const candidates: KnownLocation[] = [
-    { id: "home", label: "Home", path: homePath, icon: "home" },
-    { id: "desktop", label: "Desktop", path: path.join(homePath, "Desktop"), icon: "monitor" },
-    { id: "documents", label: "Documents", path: path.join(homePath, "Documents"), icon: "file-text" },
-    { id: "downloads", label: "Downloads", path: path.join(homePath, "Downloads"), icon: "download" },
-    { id: "pictures", label: "Pictures", path: path.join(homePath, "Pictures"), icon: "image" },
-    { id: "music", label: "Music", path: path.join(homePath, "Music"), icon: "music" },
-    { id: "videos", label: "Videos", path: path.join(homePath, "Videos"), icon: "video" }
+    { id: "home", label: "主页", path: homePath, icon: "home" },
+    { id: "desktop", label: "桌面", path: path.join(homePath, "Desktop"), icon: "monitor" },
+    { id: "documents", label: "文档", path: path.join(homePath, "Documents"), icon: "file-text" },
+    { id: "downloads", label: "下载", path: path.join(homePath, "Downloads"), icon: "download" },
+    { id: "pictures", label: "图片", path: path.join(homePath, "Pictures"), icon: "image" },
+    { id: "music", label: "音乐", path: path.join(homePath, "Music"), icon: "music" },
+    { id: "videos", label: "视频", path: path.join(homePath, "Videos"), icon: "video" }
   ];
 
   const existing = await Promise.all(
     candidates.map(async (location) => ((await pathExists(location.path)) ? location : null))
   );
   return existing.filter((location): location is KnownLocation => location !== null);
+}
+
+function getPowerShellExecutable(): string {
+  const systemRoot = process.env.SystemRoot;
+  return systemRoot ? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+}
+
+async function runPowerShellJson<T>(script: string, timeout = 5000): Promise<T[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      getPowerShellExecutable(),
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${script}`
+      ],
+      { windowsHide: true, timeout, maxBuffer: 1024 * 1024 }
+    );
+    const text = stdout.trim();
+    if (!text) return [];
+    const parsed = JSON.parse(text) as T | T[];
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
+interface WindowsQuickAccessRecord {
+  Label?: string;
+  Path?: string;
+}
+
+async function getWindowsQuickAccessLocations(): Promise<KnownLocation[]> {
+  const records = await runPowerShellJson<WindowsQuickAccessRecord>(
+    `
+$ErrorActionPreference = 'SilentlyContinue';
+$shell = New-Object -ComObject Shell.Application;
+$folder = $shell.Namespace('shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}');
+$items = @();
+if ($null -ne $folder) {
+  $items = @($folder.Items() | ForEach-Object {
+    $itemPath = $_.Path;
+    if ($_.IsFolder -and $itemPath -and (Test-Path -LiteralPath $itemPath -PathType Container)) {
+      [pscustomobject]@{ Label = $_.Name; Path = $itemPath }
+    }
+  });
+}
+@($items) | ConvertTo-Json -Depth 3 -Compress;
+`
+  );
+  const seen = new Set<string>();
+  const locations: KnownLocation[] = [];
+  for (const record of records) {
+    const targetPath = typeof record.Path === "string" ? record.Path.trim() : "";
+    if (!targetPath) continue;
+    const key = targetPath.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = typeof record.Label === "string" && record.Label.trim() ? record.Label.trim() : path.basename(targetPath) || targetPath;
+    locations.push({
+      id: `quick-access-${locations.length + 1}-${key.replace(/[^a-z0-9]+/g, "-")}`,
+      label,
+      path: targetPath,
+      icon: getKnownLocationIcon(label, targetPath)
+    });
+  }
+  return locations;
+}
+
+function getKnownLocationIcon(label: string, targetPath: string): string {
+  const text = `${label} ${path.basename(targetPath)}`.toLowerCase();
+  if (text.includes("desktop") || text.includes("桌面")) return "monitor";
+  if (text.includes("document") || text.includes("文档")) return "file-text";
+  if (text.includes("download") || text.includes("下载")) return "download";
+  if (text.includes("picture") || text.includes("image") || text.includes("图片")) return "image";
+  if (text.includes("music") || text.includes("音乐")) return "music";
+  if (text.includes("video") || text.includes("录像") || text.includes("视频")) return "video";
+  if (targetPath.toLowerCase() === os.homedir().toLowerCase()) return "home";
+  return "star";
+}
+
+interface WindowsDriveRecord {
+  Name?: string;
+  Path?: string;
+  Label?: string;
+  FreeBytes?: number;
+  TotalBytes?: number;
+}
+
+async function listWindowsDrivesFromPowerShell(): Promise<DriveInfo[]> {
+  const records = await runPowerShellJson<WindowsDriveRecord>(
+    `
+$items = @(Get-CimInstance Win32_LogicalDisk |
+  Where-Object { $_.DriveType -in 2, 3, 4 } |
+  Sort-Object DeviceID |
+  ForEach-Object {
+    [pscustomobject]@{
+      Name = $_.DeviceID;
+      Path = ([string]$_.DeviceID + '\\');
+      Label = $_.VolumeName;
+      FreeBytes = [double]$_.FreeSpace;
+      TotalBytes = [double]$_.Size;
+    }
+  });
+@($items) | ConvertTo-Json -Depth 3 -Compress;
+`
+  );
+  return records
+    .map((record): DriveInfo | null => {
+      const name = typeof record.Name === "string" && record.Name.trim() ? record.Name.trim() : "";
+      const drivePath = typeof record.Path === "string" && record.Path.trim() ? record.Path.trim() : name ? `${name}\\` : "";
+      if (!name || !drivePath) return null;
+      const freeBytes = Number(record.FreeBytes);
+      const totalBytes = Number(record.TotalBytes);
+      return {
+        name,
+        path: drivePath,
+        label: typeof record.Label === "string" && record.Label.trim() ? record.Label.trim() : "本地磁盘",
+        freeBytes: Number.isFinite(freeBytes) ? freeBytes : undefined,
+        totalBytes: Number.isFinite(totalBytes) ? totalBytes : undefined
+      };
+    })
+    .filter((drive): drive is DriveInfo => drive !== null);
+}
+
+async function getDiskUsage(rootPath: string): Promise<Pick<DriveInfo, "freeBytes" | "totalBytes">> {
+  try {
+    const stats = await fsp.statfs(rootPath);
+    const totalBytes = Number(stats.blocks) * Number(stats.bsize);
+    const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    return {
+      totalBytes: Number.isFinite(totalBytes) ? totalBytes : undefined,
+      freeBytes: Number.isFinite(freeBytes) ? freeBytes : undefined
+    };
+  } catch {
+    return {};
+  }
 }
 
 export async function getBootstrap(): Promise<BootstrapPayload> {
@@ -222,8 +376,152 @@ export async function createFolder(request: CreateItemRequest): Promise<FileEntr
 export async function createFile(request: CreateItemRequest): Promise<FileEntry> {
   const name = validateItemName(expandDateVariables(request.name));
   const targetPath = await uniqueTargetPath(path.join(normalizeInputPath(request.parentPath), name));
-  await fsp.writeFile(targetPath, expandDateVariables(request.content ?? ""), { encoding: "utf8", flag: "wx" });
+  const extension = path.extname(name).toLowerCase();
+  const officeDocument = await createOfficeDocumentBuffer(extension);
+  if (officeDocument && !(request.content ?? "").trim()) {
+    await fsp.writeFile(targetPath, officeDocument, { flag: "wx" });
+  } else {
+    await fsp.writeFile(targetPath, expandDateVariables(request.content ?? ""), { encoding: "utf8", flag: "wx" });
+  }
   return getFileEntry(targetPath);
+}
+
+async function createOfficeDocumentBuffer(extension: string): Promise<Buffer | null> {
+  if (extension === ".docx") return createDocxBuffer();
+  if (extension === ".xlsx") return createXlsxBuffer();
+  if (extension === ".pptx") return createPptxBuffer();
+  return null;
+}
+
+async function createDocxBuffer(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`
+  );
+  zip.folder("_rels")?.file(
+    ".rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+  );
+  zip.folder("word")?.file(
+    "document.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p/>
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function createXlsxBuffer(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`
+  );
+  zip.folder("_rels")?.file(
+    ".rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+  );
+  zip.folder("xl")?.file(
+    "workbook.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`
+  );
+  zip.folder("xl")?.folder("_rels")?.file(
+    "workbook.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`
+  );
+  zip.folder("xl")?.folder("worksheets")?.file(
+    "sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>`
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function createPptxBuffer(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`
+  );
+  zip.folder("_rels")?.file(
+    ".rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`
+  );
+  zip.folder("ppt")?.file(
+    "presentation.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId1"/>
+  </p:sldIdLst>
+  <p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
+  <p:notesSz cx="6858000" cy="9144000"/>
+</p:presentation>`
+  );
+  zip.folder("ppt")?.folder("_rels")?.file(
+    "presentation.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`
+  );
+  zip.folder("ppt")?.folder("slides")?.file(
+    "slide1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
 }
 
 export function expandDateVariables(value: string, date = new Date()): string {
@@ -1181,14 +1479,283 @@ function safeDestinationPath(destinationRoot: string, archiveInternalPath: strin
 
 export async function openTerminal(directoryPath: string): Promise<OperationResult> {
   const cwd = normalizeInputPath(directoryPath);
-  const command = process.platform === "win32" ? "powershell.exe" : "sh";
-  const args =
-    process.platform === "win32"
-      ? ["-NoExit", "-Command", `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`]
-      : ["-lc", `cd "${cwd.replace(/"/g, '\\"')}" && exec "$SHELL"`];
-  const child = spawn(command, args, { cwd, detached: true, stdio: "ignore", windowsHide: false });
+  if (process.platform === "win32") {
+    const windowsTerminal = spawn("wt.exe", ["-d", cwd], { cwd, detached: true, stdio: "ignore", windowsHide: false });
+    const windowsTerminalError = await waitForImmediateSpawnError(windowsTerminal);
+    if (!windowsTerminalError) {
+      windowsTerminal.unref();
+      return { ok: true, message: `Opened Windows Terminal in ${cwd}.`, affectedPaths: [cwd] };
+    }
+
+    const fallbackArgs = ["-NoExit", "-Command", `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`];
+    const fallback = spawn("powershell.exe", fallbackArgs, { cwd, detached: true, stdio: "ignore", windowsHide: false });
+    const fallbackError = await waitForImmediateSpawnError(fallback);
+    if (fallbackError) throw windowsTerminalError;
+    fallback.unref();
+    return { ok: true, message: `Windows Terminal was not available; opened PowerShell in ${cwd}.`, affectedPaths: [cwd] };
+  }
+
+  const child = spawn("sh", ["-lc", `cd "${cwd.replace(/"/g, '\\"')}" && exec "$SHELL"`], {
+    cwd,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false
+  });
   child.unref();
   return { ok: true, message: `Opened terminal in ${cwd}.`, affectedPaths: [cwd] };
+}
+
+export async function runSvnCommand(request: SvnCommandRequest): Promise<OperationResult> {
+  const targetPath = normalizeInputPath(request.path);
+  if (!(await pathExists(targetPath))) {
+    throw new Error("Path does not exist.");
+  }
+
+  const stats = await fsp.lstat(targetPath);
+  const cwd = stats.isDirectory() ? targetPath : path.dirname(targetPath);
+  const tortoiseProc = process.platform === "win32" ? await findTortoiseProc() : null;
+  if (tortoiseProc) {
+    const child = spawn(tortoiseProc, [`/command:${request.command}`, `/path:${targetPath}`], {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+      shell: false
+    });
+    const spawnError = await waitForImmediateSpawnError(child);
+    if (spawnError) throw spawnError;
+    child.unref();
+    return { ok: true, message: `SVN ${request.command} opened.`, affectedPaths: [targetPath] };
+  }
+
+  if (request.command === "commit") {
+    throw new Error("TortoiseSVN was not found. SVN Commit needs TortoiseSVN to open the commit dialog.");
+  }
+
+  const commandLine =
+    process.platform === "win32"
+      ? ["start", "\"\"", "cmd.exe", "/k", "svn", "update", quoteShellArg(targetPath)].join(" ")
+      : ["svn", "update", quoteShellArg(targetPath)].join(" ");
+  const child =
+    process.platform === "win32"
+      ? spawn("cmd.exe", ["/d", "/s", "/c", commandLine], { cwd, detached: true, stdio: "ignore", windowsHide: false })
+      : spawn("sh", ["-lc", commandLine], { cwd, detached: true, stdio: "ignore", windowsHide: false });
+  const spawnError = await waitForImmediateSpawnError(child);
+  if (spawnError) throw spawnError;
+  child.unref();
+  return { ok: true, message: "SVN update started.", affectedPaths: [targetPath] };
+}
+
+async function findTortoiseProc(): Promise<string | null> {
+  const candidates = [
+    process.env.ProgramW6432,
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"]
+  ]
+    .filter((root): root is string => !!root)
+    .map((root) => path.join(root, "TortoiseSVN", "bin", "TortoiseProc.exe"));
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+export async function showSystemContextMenu(request: SystemContextMenuRequest): Promise<OperationResult> {
+  const targetPath = normalizeInputPath(request.path);
+  if (!(await pathExists(targetPath))) {
+    throw new Error("Path does not exist.");
+  }
+
+  if (process.platform !== "win32") {
+    const opener = process.platform === "darwin" ? "open" : "xdg-open";
+    const child = spawn(opener, [path.dirname(targetPath)], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return { ok: true, message: "Opened containing folder.", affectedPaths: [targetPath] };
+  }
+
+  const menuX = Number.isFinite(request.x) ? Math.round(request.x) : 0;
+  const menuY = Number.isFinite(request.y) ? Math.round(request.y) : 0;
+  const script = `
+$target = ${quotePowerShellString(targetPath)};
+$menuX = ${menuX};
+$menuY = ${menuY};
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential)]
+public struct POINT {
+  public int x;
+  public int y;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct CMINVOKECOMMANDINFO {
+  public int cbSize;
+  public int fMask;
+  public IntPtr hwnd;
+  public IntPtr lpVerb;
+  public string lpParameters;
+  public string lpDirectory;
+  public int nShow;
+  public int dwHotKey;
+  public IntPtr hIcon;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct STRRET {
+  public uint uType;
+  public IntPtr pOleStr;
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("000214E6-0000-0000-C000-000000000046")]
+public interface IShellFolder {
+  [PreserveSig] int ParseDisplayName(IntPtr hwnd, IntPtr pbc, [MarshalAs(UnmanagedType.LPWStr)] string pszDisplayName, ref uint pchEaten, out IntPtr ppidl, ref uint pdwAttributes);
+  [PreserveSig] int EnumObjects(IntPtr hwnd, int grfFlags, out IntPtr ppenumIDList);
+  [PreserveSig] int BindToObject(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+  [PreserveSig] int BindToStorage(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+  [PreserveSig] int CompareIDs(IntPtr lParam, IntPtr pidl1, IntPtr pidl2);
+  [PreserveSig] int CreateViewObject(IntPtr hwndOwner, ref Guid riid, out IntPtr ppv);
+  [PreserveSig] int GetAttributesOf(uint cidl, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] IntPtr[] apidl, ref uint rgfInOut);
+  [PreserveSig] int GetUIObjectOf(IntPtr hwndOwner, uint cidl, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] IntPtr[] apidl, ref Guid riid, IntPtr rgfReserved, out IntPtr ppv);
+  [PreserveSig] int GetDisplayNameOf(IntPtr pidl, uint uFlags, out STRRET pName);
+  [PreserveSig] int SetNameOf(IntPtr hwnd, IntPtr pidl, [MarshalAs(UnmanagedType.LPWStr)] string pszName, uint uFlags, out IntPtr ppidlOut);
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("000214E4-0000-0000-C000-000000000046")]
+public interface IContextMenu {
+  [PreserveSig] int QueryContextMenu(IntPtr hmenu, uint indexMenu, uint idCmdFirst, uint idCmdLast, uint uFlags);
+  [PreserveSig] int InvokeCommand(ref CMINVOKECOMMANDINFO pici);
+  [PreserveSig] int GetCommandString(UIntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
+}
+
+public static class SpaceShellContextMenu {
+  const uint CMF_NORMAL = 0x00000000;
+  const uint TPM_RIGHTBUTTON = 0x0002;
+  const uint TPM_RETURNCMD = 0x0100;
+  const int SW_SHOWNORMAL = 1;
+
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+  [DllImport("shell32.dll")]
+  static extern int SHBindToParent(IntPtr pidl, ref Guid riid, out IShellFolder ppv, out IntPtr ppidlLast);
+
+  [DllImport("ole32.dll")]
+  static extern void CoTaskMemFree(IntPtr pv);
+
+  [DllImport("user32.dll")]
+  static extern IntPtr CreatePopupMenu();
+
+  [DllImport("user32.dll")]
+  static extern bool DestroyMenu(IntPtr hMenu);
+
+  [DllImport("user32.dll")]
+  static extern uint TrackPopupMenuEx(IntPtr hMenu, uint uFlags, int x, int y, IntPtr hwnd, IntPtr lptpm);
+
+  [DllImport("user32.dll")]
+  static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll")]
+  static extern bool GetCursorPos(out POINT lpPoint);
+
+  static void ThrowIfFailed(int hr, string operation) {
+    if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+  }
+
+  public static void Show(string targetPath, int x, int y, IntPtr owner) {
+    IntPtr pidl = IntPtr.Zero;
+    IntPtr contextMenuPtr = IntPtr.Zero;
+    IntPtr hMenu = IntPtr.Zero;
+    IContextMenu contextMenu = null;
+    try {
+      uint attributes = 0;
+      ThrowIfFailed(SHParseDisplayName(targetPath, IntPtr.Zero, out pidl, 0, out attributes), "SHParseDisplayName");
+
+      Guid shellFolderId = new Guid("000214E6-0000-0000-C000-000000000046");
+      IShellFolder parentFolder;
+      IntPtr childPidl;
+      ThrowIfFailed(SHBindToParent(pidl, ref shellFolderId, out parentFolder, out childPidl), "SHBindToParent");
+
+      Guid contextMenuId = new Guid("000214E4-0000-0000-C000-000000000046");
+      IntPtr[] children = new IntPtr[] { childPidl };
+      if (owner == IntPtr.Zero) owner = GetForegroundWindow();
+      ThrowIfFailed(parentFolder.GetUIObjectOf(owner, 1, children, ref contextMenuId, IntPtr.Zero, out contextMenuPtr), "GetUIObjectOf");
+      contextMenu = (IContextMenu)Marshal.GetObjectForIUnknown(contextMenuPtr);
+
+      hMenu = CreatePopupMenu();
+      if (hMenu == IntPtr.Zero) throw new InvalidOperationException("CreatePopupMenu failed.");
+      ThrowIfFailed(contextMenu.QueryContextMenu(hMenu, 0, 1, 0x7fff, CMF_NORMAL), "QueryContextMenu");
+
+      if (x <= 0 && y <= 0) {
+        POINT point;
+        if (GetCursorPos(out point)) {
+          x = point.x;
+          y = point.y;
+        }
+      }
+
+      uint command = TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, x, y, owner, IntPtr.Zero);
+      if (command > 0) {
+        CMINVOKECOMMANDINFO invoke = new CMINVOKECOMMANDINFO();
+        invoke.cbSize = Marshal.SizeOf(typeof(CMINVOKECOMMANDINFO));
+        invoke.hwnd = owner;
+        invoke.lpVerb = (IntPtr)(command - 1);
+        invoke.nShow = SW_SHOWNORMAL;
+        ThrowIfFailed(contextMenu.InvokeCommand(ref invoke), "InvokeCommand");
+      }
+    } finally {
+      if (hMenu != IntPtr.Zero) DestroyMenu(hMenu);
+      if (contextMenu != null) Marshal.ReleaseComObject(contextMenu);
+      if (contextMenuPtr != IntPtr.Zero) Marshal.Release(contextMenuPtr);
+      if (pidl != IntPtr.Zero) CoTaskMemFree(pidl);
+    }
+  }
+}
+"@;
+Add-Type -AssemblyName System.Windows.Forms;
+Add-Type -AssemblyName System.Drawing;
+$owner = New-Object System.Windows.Forms.Form;
+$owner.ShowInTaskbar = $false;
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None;
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual;
+$owner.Size = New-Object System.Drawing.Size(1, 1);
+$owner.Location = New-Object System.Drawing.Point($menuX, $menuY);
+$owner.TopMost = $true;
+$owner.Opacity = 0.01;
+$owner.Show();
+$owner.Activate();
+try {
+  [SpaceShellContextMenu]::Show($target, $menuX, $menuY, $owner.Handle);
+} finally {
+  $owner.Close();
+  $owner.Dispose();
+}
+`;
+  try {
+    await execFileAsync(getPowerShellExecutable(), ["-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      windowsHide: true,
+      maxBuffer: 1024 * 1024
+    });
+  } catch (error) {
+    const detail =
+      error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string" && error.stderr.trim()
+        ? error.stderr.trim()
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    throw new Error(`System context menu failed: ${detail}`);
+  }
+  return { ok: true, message: "Opened system context menu.", affectedPaths: [targetPath] };
 }
 
 export async function runQuickLaunch(request: QuickLaunchRunRequest): Promise<OperationResult> {

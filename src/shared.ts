@@ -40,6 +40,7 @@ export interface DirectoryPayload {
 export interface DriveInfo {
   name: string;
   path: string;
+  label?: string;
   freeBytes?: number;
   totalBytes?: number;
 }
@@ -370,6 +371,19 @@ export interface QuickLaunchRunRequest {
   selectedFolderPaths: string[];
 }
 
+export interface SystemContextMenuRequest {
+  path: string;
+  x: number;
+  y: number;
+}
+
+export type SvnCommand = "update" | "commit";
+
+export interface SvnCommandRequest {
+  path: string;
+  command: SvnCommand;
+}
+
 export interface SpaceApi {
   bootstrap(): Promise<BootstrapPayload>;
   listDirectory(path: string): Promise<DirectoryPayload>;
@@ -396,8 +410,13 @@ export interface SpaceApi {
   openTerminal(path: string): Promise<OperationResult>;
   copyTextToClipboard(text: string): Promise<OperationResult>;
   runQuickLaunch(request: QuickLaunchRunRequest): Promise<OperationResult>;
+  runSvnCommand(request: SvnCommandRequest): Promise<OperationResult>;
+  showSystemContextMenu(request: SystemContextMenuRequest): Promise<OperationResult>;
   getWorkspace(): Promise<WorkspaceDocument | null>;
   saveWorkspace(snapshot: WorkspaceDocument): Promise<OperationResult>;
+  minimizeWindow?(): Promise<OperationResult>;
+  toggleMaximizeWindow?(): Promise<OperationResult>;
+  closeWindow?(): Promise<OperationResult>;
 }
 
 declare global {

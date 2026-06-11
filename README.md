@@ -4,26 +4,23 @@ Space is a Windows desktop file manager inspired by QSpace. It is built with Ele
 
 ## Current Feature Set
 
-- Four integrated explorer panes with a modern compact desktop layout.
-- Per-pane navigation: back, forward, up, refresh, breadcrumb navigation, and editable address bar with path suggestions.
-- Per-pane details/icon views, sortable details columns, multi-select, status bar, and active-pane highlighting.
-- Quick Access sidebar for common Windows user folders, drive list, and user bookmarks.
-- File operations through Electron IPC: create folder, create templated file, rename, delete to trash, copy, move, open, reveal in Explorer, and open terminal.
+- Four integrated explorer panes in a light, frameless, compact desktop layout.
+- Per-pane navigation: back, forward, up, refresh, compact breadcrumb navigation, and editable address bar with path suggestions.
+- Per-pane details/icon views, richer icons for common file types, sortable details columns, multi-select, status bar, and active-pane highlighting.
+- Sidebar ordered for daily use: Stash Shelf, Windows Explorer Quick Access entries plus Space-only dropped shortcuts, then drives with volume names and usage bars.
+- File operations through Electron IPC: create folder, create templated file, rename, delete to trash, copy, move, open, reveal in Explorer, and open Windows Terminal in the current directory.
 - Selection utilities: copy selected full paths to the system clipboard and expand the current selection to matching file types or folders.
-- Cross-pane workflows: copy/move selected files to any other pane, internal copy/cut/paste, and drag/drop copy or shift-drop move.
-- Search/filter: instant pane filtering and recursive search with bounded results.
+- Cross-pane workflows: internal copy/cut/paste, drag/drop copy or shift-drop move, and live pane reordering by dragging a pane handle over another pane.
+- Search/filter: per-pane filter is hidden by default and opens on demand, with recursive search capped to bounded results.
 - Workspace Search: search across the current four-pane workspace, de-duplicate matches from overlapping pane roots, then open, reveal, or add results to Stash Shelf.
 - Workspace persistence: pane paths, histories, layout, active pane, and bookmarks are restored between launches.
-- New File Templates: create files from built-in or workspace-saved templates, edit template content, and use `$date(...)` variables in names or content.
-- Color Rules: per-workspace rules highlight matching files/folders by type, name operator, extension, size, modified age, and created age with custom text/background colors.
-- Quick Launch: per-workspace launch items run apps, command lines, or shortcuts from the active pane with variables for current path and selected files.
-- Custom Actions: per-workspace toolbar actions, context menu actions, and action hotkeys can be shown, hidden, reordered, assigned, and restored to defaults.
-- Inspector: text/image preview, metadata, reveal action, and SHA-256 hash calculation.
+- New File Templates: create txt, Markdown, Word, Excel, and PowerPoint files from built-in or workspace-saved templates, edit template content, and use `$date(...)` variables in names or content.
+- Custom Actions: per-workspace toolbar actions and action hotkeys can be shown, hidden, reordered, assigned, and restored to defaults; right-click opens a fixed grouped Space menu with open/copy/cut/paste, shelf/bookmark/reveal, SVN Update/Commit, and new-file actions.
+- Inspector: hidden by default, with on-demand text/image preview, metadata, reveal action, and SHA-256 hash calculation.
 - Hash Compare: calculate MD5, SHA-1, SHA-256, or SHA-512 for selected files and group matching hashes to verify duplicates or copied files.
-- Batch rename: selected items get a live rename preview with sequence, date, find/replace, case conversion, prefix/suffix, conflict detection, reusable workspace presets, apply, and per-workspace rename history.
 - Folder sync: compare two folders, preview one-way or bidirectional copy actions for missing/newer files, optionally include hidden items, save reusable workspace presets, and execute the sync.
 - Workspace tabs: create, clone, rename, delete, switch, auto-save, and restore multiple four-pane workspaces. Legacy single-workspace state is migrated automatically.
-- Stash Shelf: collect files or folders from any pane, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
+- Stash Shelf: collect files or folders from any pane or by dropping onto the shelf area, preview shelf items, copy or move the whole shelf into the active pane, clear individual items, and calculate SHA-256 hashes for staged files.
 - ZIP/TAR/TGZ archive tools: double-click supported archives to browse entries, preview text/images inside archives, extract selected/all entries, and create ZIP files from selected local items.
 - Keyboard shortcuts: Tab/Shift+Tab pane focus, Ctrl+A/C/X/V, Ctrl+Shift+C for full paths, Ctrl+R, Alt+Up, Delete, F2, Enter, and user-assigned per-workspace action hotkeys.
 - Testable renderer fallback: when opened in a browser without Electron, Space uses a mock filesystem for UI verification.
@@ -62,4 +59,4 @@ npm run smoke:electron
 
 ## Known Scope Boundaries
 
-The current implementation focuses on the local Windows filesystem. ZIP, TAR, TGZ, and TAR.GZ archives are supported for browsing and extraction; other archive formats such as 7z/rar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, media-dimension color rules, system-wide global hotkeys, custom per-action icons, and arbitrary third-party context menu providers are not implemented yet.
+The current implementation focuses on the local Windows filesystem. ZIP, TAR, TGZ, and TAR.GZ archives are supported for browsing and extraction; other archive formats such as 7z/rar, encrypted archives, FTP/SFTP/cloud drives, scheduled/automatic folder sync runs, system-wide global hotkeys, and extracted Windows system icon bitmaps are not implemented yet.

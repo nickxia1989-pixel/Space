@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
+import { getSpaceApi } from "../src/api";
 import type { DirectoryPayload, FileEntry, SpaceApi, WorkspaceDocument } from "../src/shared";
 
 function readSavedWorkspace(): WorkspaceDocument | null {
@@ -17,6 +18,23 @@ function deferred<T>() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function createTestDataTransfer() {
+  const values = new Map<string, string>();
+  return {
+    files: [],
+    effectAllowed: "all",
+    dropEffect: "none",
+    setData: vi.fn((type: string, value: string) => values.set(type, value)),
+    getData: vi.fn((type: string) => values.get(type) ?? "")
+  } as unknown as DataTransfer;
+}
+
+async function clickToolbarOverflowAction(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByLabelText("更多操作"));
+  const overflowMenu = screen.getByRole("menu", { name: "更多文件操作" });
+  await user.click(within(overflowMenu).getByRole("menuitem", { name: label }));
 }
 
 function testEntry(parentPath: string, name: string, isDirectory = false): FileEntry {
@@ -156,7 +174,7 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText("Four-pane file manager")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("四窗格资源管理器")).toBeInTheDocument());
     expect(screen.getByLabelText("Pane 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
@@ -165,24 +183,47 @@ describe("App", () => {
   });
 
   it("renders four explorer panes with default controls", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText("Four-pane file manager")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("四窗格资源管理器")).toBeInTheDocument());
     expect(screen.getByLabelText("Pane 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 4")).toBeInTheDocument();
-    expect(screen.getAllByPlaceholderText("Filter or search")).toHaveLength(4);
+    expect(screen.queryByPlaceholderText("过滤或搜索")).not.toBeInTheDocument();
+    expect(screen.queryByText("Inspector")).not.toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "调整窗格列宽" })).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "调整窗格行高" })).toBeInTheDocument();
+    expect(screen.queryByText("快速访问")).not.toBeInTheDocument();
+    const stashHeading = screen.getByText("暂存架");
+    const shortcutHeading = screen.getByText("快捷入口");
+    const drivesHeading = screen.getByText("磁盘");
+    expect(stashHeading.compareDocumentPosition(shortcutHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(shortcutHeading.compareDocumentPosition(drivesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("系统 (C:)")).toBeInTheDocument();
+    expect(screen.getByLabelText("系统 (C:) 占用 75%")).toBeInTheDocument();
+
+    await user.click(within(screen.getByLabelText("Pane 1")).getByLabelText("过滤/搜索"));
+    expect(within(screen.getByLabelText("Pane 1")).getByPlaceholderText("过滤或搜索")).toBeInTheDocument();
   });
 
   it("migrates legacy action layouts to include current default actions", async () => {
+    const user = userEvent.setup();
     writeLegacyActionWorkspace();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText("Workspace search")).toBeInTheDocument());
-    expect(screen.getByLabelText("Hash compare")).toBeInTheDocument();
-    expect(screen.getByLabelText("Copy paths")).toBeInTheDocument();
-    expect(screen.getByLabelText("Select same type")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Windows Terminal")).toBeInTheDocument());
+    expect(screen.queryByLabelText("工作区搜索")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("更多操作")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("更多操作"));
+    const overflowMenu = screen.getByRole("menu", { name: "更多文件操作" });
+    expect(within(overflowMenu).getByRole("menuitem", { name: "哈希对比" })).toBeInTheDocument();
+    expect(within(overflowMenu).getByRole("menuitem", { name: "复制路径" })).toBeInTheDocument();
+    expect(within(overflowMenu).getByRole("menuitem", { name: "选择同类型" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("批量重命名")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("颜色规则")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("快速启动")).not.toBeInTheDocument();
   });
 
   it("supports switching an individual pane to icon view", async () => {
@@ -190,8 +231,8 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
-    await user.click(screen.getAllByLabelText("Icon view")[0]);
-    expect(screen.getAllByLabelText("Icon view")[0]).toHaveClass("active");
+    await user.click(screen.getAllByLabelText("图标视图")[0]);
+    expect(screen.getAllByLabelText("图标视图")[0]).toHaveClass("active");
   });
 
   it("suggests matching paths in the address bar", async () => {
@@ -275,16 +316,23 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("New file"));
-    const dialog = screen.getByRole("dialog", { name: "New file" });
-    const markdownButton = within(dialog).getByText("Markdown Note").closest("button");
+    await user.click(screen.getByLabelText("新建文件"));
+    const dialog = screen.getByRole("dialog", { name: "新建文件" });
+    expect(within(dialog).getByText("空白文本")).toBeInTheDocument();
+    expect(within(dialog).getByText("Word 文档")).toBeInTheDocument();
+    expect(within(dialog).getByText("Excel 工作簿")).toBeInTheDocument();
+    expect(within(dialog).getByText("PowerPoint 演示文稿")).toBeInTheDocument();
+    expect(within(dialog).queryByText("JSON")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("PowerShell 脚本")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("HTML 页面")).not.toBeInTheDocument();
+    const markdownButton = within(dialog).getByText("Markdown 笔记").closest("button");
     expect(markdownButton).not.toBeNull();
     await user.click(markdownButton!);
 
-    expect(within(dialog).getByDisplayValue(`Note-${today}.md`)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(within(dialog).getByDisplayValue(`笔记-${today}.md`)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(screen.getByText(`Note-${today}.md`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(`笔记-${today}.md`)).toBeInTheDocument());
   });
 
   it("refreshes every pane showing the same folder after creating a folder", async () => {
@@ -299,7 +347,7 @@ describe("App", () => {
     await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
     await waitFor(() => expect(within(pane2).getByText("Space Notes.md")).toBeInTheDocument());
 
-    await user.click(screen.getByLabelText("New folder"));
+    await user.click(screen.getByLabelText("新建文件夹"));
 
     expect(await within(pane1).findByText("Shared Folder")).toBeInTheDocument();
     expect(await within(pane2).findByText("Shared Folder")).toBeInTheDocument();
@@ -320,7 +368,7 @@ describe("App", () => {
     await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Desktop"));
-    await user.click(screen.getByLabelText("Delete"));
+    await user.click(screen.getByLabelText("删除"));
 
     expect(await screen.findByText("Deleted 1 item(s).")).toBeInTheDocument();
     await waitFor(() => expect(within(pane2).getByDisplayValue(homePath)).toBeInTheDocument());
@@ -345,9 +393,9 @@ describe("App", () => {
     await waitFor(() => expect(within(pane3).getByText("Archive.zip")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Desktop"));
-    await user.click(screen.getByLabelText("Cut"));
+    await user.click(screen.getByLabelText("剪切"));
     await user.click(pane3);
-    await user.click(screen.getByLabelText("Paste"));
+    await user.click(screen.getByLabelText("粘贴"));
 
     expect(await screen.findByText("Moved 1 item(s).")).toBeInTheDocument();
     await waitFor(() => expect(within(pane2).getByDisplayValue(`${downloadsPath}\\Desktop`)).toBeInTheDocument());
@@ -369,7 +417,7 @@ describe("App", () => {
     await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Desktop"));
-    const shell = screen.getByText("Four-pane file manager").closest("main");
+    const shell = screen.getByText("四窗格资源管理器").closest("main");
     expect(shell).not.toBeNull();
     fireEvent.keyDown(shell!, { key: "F2" });
 
@@ -388,48 +436,60 @@ describe("App", () => {
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
     await user.click(within(pane).getByText("Space Notes.md"));
-    const shell = screen.getByText("Four-pane file manager").closest("main");
+    const shell = screen.getByText("四窗格资源管理器").closest("main");
     expect(shell).not.toBeNull();
     fireEvent.keyDown(shell!, { key: "F2" });
 
     expect(await screen.findByText("Rename complete.")).toBeInTheDocument();
-    await waitFor(() => expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane).getByText("已选 1 项，4.7 KB")).toBeInTheDocument());
     expect(within(pane).getByText("Renamed Notes.md").closest("button")).toHaveClass("selected");
     promptSpy.mockRestore();
   });
 
-  it("opens advanced batch rename and folder sync panels", async () => {
+  it("shows text labels on top actions and opens folder sync without retired utilities", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
-    await user.click(screen.getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Batch rename"));
-    expect(screen.getByRole("dialog", { name: "Batch rename" })).toBeInTheDocument();
-    await user.click(screen.getByText("Close"));
+    expect(screen.getByText("新建文件夹")).toBeInTheDocument();
+    expect(screen.getByText("Windows Terminal")).toBeInTheDocument();
+    expect(screen.getByText("更多")).toBeInTheDocument();
+    expect(screen.queryByLabelText("工作区搜索")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("批量重命名")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("颜色规则")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("快速启动")).not.toBeInTheDocument();
 
-    await user.click(screen.getByLabelText("Folder sync"));
-    expect(screen.getByRole("dialog", { name: "Folder sync" })).toBeInTheDocument();
+    await user.click(screen.getByLabelText("更多操作"));
+    const overflowMenu = screen.getByRole("menu", { name: "更多文件操作" });
+    expect(within(overflowMenu).queryByText("工作区搜索")).not.toBeInTheDocument();
+    await user.click(within(overflowMenu).getByRole("menuitem", { name: "文件夹同步" }));
+    expect(screen.getByRole("dialog", { name: "文件夹同步" })).toBeInTheDocument();
   });
 
-  it("runs workspace search and adds results to the stash shelf", async () => {
+  it("runs per-pane recursive search and clears the loading state", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 3");
+    await waitFor(() => expect(within(pane).getByText("Archive.zip")).toBeInTheDocument());
+    await user.click(within(pane).getByLabelText("过滤/搜索"));
+    await user.type(within(pane).getByPlaceholderText("过滤或搜索"), "Archive");
+    await user.click(within(pane).getByLabelText("子文件夹"));
+    await user.click(within(pane).getByRole("button", { name: "搜索" }));
+
+    expect(await within(pane).findByText("Archive.tar")).toBeInTheDocument();
+    await waitFor(() => expect(within(pane).queryByText("加载中...")).not.toBeInTheDocument());
+  });
+
+  it("does not expose the removed workspace search action", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Archive.tar")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("Workspace search"));
-
-    const dialog = screen.getByRole("dialog", { name: "Workspace search" });
-    await user.type(within(dialog).getByLabelText("Query"), "Archive");
-    await user.click(within(dialog).getByRole("button", { name: "Search" }));
-
-    expect(await within(dialog).findByText("2 result(s)")).toBeInTheDocument();
-    expect(within(dialog).getByText("Archive.zip")).toBeInTheDocument();
-    expect(within(dialog).getByText("Archive.tar")).toBeInTheDocument();
-
-    await user.click(within(dialog).getByRole("button", { name: "Shelf Archive.tar" }));
-    expect(await screen.findByText("Added 1 item(s) to shelf.")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Stash Shelf" })).getByText("Archive.tar")).toBeInTheDocument();
+    expect(screen.queryByLabelText("工作区搜索")).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("更多操作"));
+    expect(within(screen.getByRole("menu", { name: "更多文件操作" })).queryByText("工作区搜索")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "工作区搜索" })).not.toBeInTheDocument();
   });
 
   it("compares selected file hashes", async () => {
@@ -439,13 +499,13 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
     await user.click(screen.getByText("Archive.zip"));
     fireEvent.click(screen.getByText("Archive.tar"), { ctrlKey: true });
-    await user.click(screen.getByLabelText("Hash compare"));
+    await clickToolbarOverflowAction(user, "哈希对比");
 
-    const dialog = screen.getByRole("dialog", { name: "Hash compare" });
-    await user.click(within(dialog).getByRole("button", { name: "Calculate" }));
+    const dialog = screen.getByRole("dialog", { name: "哈希对比" });
+    await user.click(within(dialog).getByRole("button", { name: "计算" }));
 
-    expect(await within(dialog).findByText(/1 matching group/)).toBeInTheDocument();
-    expect(within(dialog).getByText("2 matching files")).toBeInTheDocument();
+    expect(await within(dialog).findByText(/1 组相同/)).toBeInTheDocument();
+    expect(within(dialog).getByText("2 个相同文件")).toBeInTheDocument();
     expect(within(dialog).getAllByText("mock-hash-value").length).toBeGreaterThan(0);
   });
 
@@ -456,16 +516,16 @@ describe("App", () => {
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Desktop")).toBeInTheDocument());
     await user.click(within(pane).getByText("Desktop"));
-    await user.click(screen.getByLabelText("Copy paths"));
+    await clickToolbarOverflowAction(user, "复制路径");
 
     expect(await screen.findByText("Copied 1 path(s).")).toBeInTheDocument();
     expect(window.localStorage.getItem("space.mock.clipboard")).toBe("C:\\Users\\Traveler\\Desktop");
 
-    await user.click(screen.getByLabelText("Select same type"));
+    await clickToolbarOverflowAction(user, "选择同类型");
     expect(await screen.findByText("Selected 4 same type item(s).")).toBeInTheDocument();
-    expect(screen.getByText("4 selected, 0 B")).toBeInTheDocument();
+    expect(screen.getByText("已选 4 项，0 B")).toBeInTheDocument();
 
-    const shell = screen.getByText("Four-pane file manager").closest("main");
+    const shell = screen.getByText("四窗格资源管理器").closest("main");
     expect(shell).not.toBeNull();
     fireEvent.keyDown(shell!, { key: "c", ctrlKey: true, shiftKey: true });
     expect(await screen.findByText("Copied 4 path(s).")).toBeInTheDocument();
@@ -486,11 +546,11 @@ describe("App", () => {
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
     await user.click(within(pane).getByText("Space Notes.md"));
-    expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument();
+    expect(within(pane).getByText("已选 1 项，4.7 KB")).toBeInTheDocument();
 
-    await user.click(within(pane).getByLabelText("Refresh pane"));
+    await user.click(within(pane).getByLabelText("刷新窗格"));
 
-    await waitFor(() => expect(within(pane).getByText("1 selected, 4.7 KB")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane).getByText("已选 1 项，4.7 KB")).toBeInTheDocument());
     expect(within(pane).getByText("Space Notes.md").closest("button")).toHaveClass("selected");
   });
 
@@ -501,11 +561,12 @@ describe("App", () => {
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Pictures")).toBeInTheDocument());
     await user.click(within(pane).getByText("Pictures"));
-    fireEvent.change(within(pane).getByPlaceholderText("Filter or search"), { target: { value: "D" } });
+    await user.click(within(pane).getByLabelText("过滤/搜索"));
+    fireEvent.change(within(pane).getByPlaceholderText("过滤或搜索"), { target: { value: "D" } });
 
     fireEvent.click(within(pane).getByText("Desktop"), { shiftKey: true });
 
-    await waitFor(() => expect(within(pane).getByText("1 selected, 0 B")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane).getByText("已选 1 项，0 B")).toBeInTheDocument());
     expect(within(pane).getByText("Desktop").closest("button")).toHaveClass("selected");
   });
 
@@ -516,12 +577,13 @@ describe("App", () => {
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Pictures")).toBeInTheDocument());
     await user.click(within(pane).getByText("Pictures"));
-    expect(within(pane).getByText("1 selected, 0 B")).toBeInTheDocument();
+    expect(within(pane).getByText("已选 1 项，0 B")).toBeInTheDocument();
 
-    fireEvent.change(within(pane).getByPlaceholderText("Filter or search"), { target: { value: "D" } });
+    await user.click(within(pane).getByLabelText("过滤/搜索"));
+    fireEvent.change(within(pane).getByPlaceholderText("过滤或搜索"), { target: { value: "D" } });
 
-    await waitFor(() => expect(within(pane).getByText("No selection")).toBeInTheDocument());
-    expect(screen.getByLabelText("Delete")).toBeDisabled();
+    await waitFor(() => expect(within(pane).getByText("未选择")).toBeInTheDocument());
+    expect(screen.getByLabelText("删除")).toBeDisabled();
   });
 
   it("copies and moves files between panes through clipboard paste", async () => {
@@ -534,17 +596,17 @@ describe("App", () => {
     await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Copy"));
+    await user.click(screen.getByLabelText("复制"));
     await user.click(pane2);
-    await user.click(screen.getByLabelText("Paste"));
+    await user.click(screen.getByLabelText("粘贴"));
 
     expect(await within(pane2).findByText("Space Notes.md")).toBeInTheDocument();
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
 
     await user.click(within(pane2).getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Cut"));
+    await user.click(screen.getByLabelText("剪切"));
     await user.click(pane3);
-    await user.click(screen.getByLabelText("Paste"));
+    await user.click(screen.getByLabelText("粘贴"));
 
     expect(await within(pane3).findByText("Space Notes.md")).toBeInTheDocument();
     await waitFor(() => expect(within(pane2).queryByText("Space Notes.md")).not.toBeInTheDocument());
@@ -560,55 +622,67 @@ describe("App", () => {
     await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Desktop"));
-    await user.click(screen.getByLabelText("Cut"));
+    await user.click(screen.getByLabelText("剪切"));
     await user.click(pane2);
-    await user.click(screen.getByLabelText("Paste"));
+    await user.click(screen.getByLabelText("粘贴"));
 
     expect(await screen.findByText("Paste move failed: Cannot move a folder into itself.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Paste")).not.toBeDisabled();
+    expect(screen.getByLabelText("粘贴")).not.toBeDisabled();
   });
 
-  it("copies from the pane that owns the transfer button even when another pane is active", async () => {
-    const user = userEvent.setup();
+  it("routes sidebar drops by target section", async () => {
+    render(<App />);
+
+    await screen.findByLabelText("Pane 1");
+    const shortcuts = screen.getByText("快捷入口").closest("section");
+    const shelf = screen.getByRole("region", { name: "Stash Shelf" });
+    expect(shortcuts).not.toBeNull();
+
+    const shelfTransfer = createTestDataTransfer();
+    shelfTransfer.setData("application/x-space-paths", JSON.stringify(["C:\\Users\\Traveler\\Desktop\\Todo.txt"]));
+    fireEvent.drop(shelf, { dataTransfer: shelfTransfer });
+    expect(await within(shelf).findByText("Todo.txt")).toBeInTheDocument();
+
+    const shortcutTransfer = createTestDataTransfer();
+    shortcutTransfer.setData("application/x-space-paths", JSON.stringify(["C:\\Users\\Traveler\\CustomDrop"]));
+    fireEvent.drop(shortcuts!, { dataTransfer: shortcutTransfer });
+
+    expect(await screen.findByText("CustomDrop")).toBeInTheDocument();
+    expect(await screen.findByText("已添加快捷入口。")).toBeInTheDocument();
+  });
+
+  it("previews pane drag target and swaps pane contents on release", async () => {
     render(<App />);
 
     const pane1 = await screen.findByLabelText("Pane 1");
-    const pane2 = await screen.findByLabelText("Pane 2");
-    const pane3 = await screen.findByLabelText("Pane 3");
-    await waitFor(() => expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument());
+    const pane4 = await screen.findByLabelText("Pane 4");
+    await waitFor(() => expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument());
+    await waitFor(() => expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument());
 
-    await user.click(within(pane1).getByText("Space Notes.md"));
-    await user.click(pane2);
-    await user.click(within(pane1).getAllByRole("button", { name: "P3" })[0]);
+    const elementFromPoint = vi.fn(() => pane4);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+    fireEvent.mouseDown(within(pane1).getByLabelText("拖动交换 P1"), { button: 0, clientX: 20, clientY: 20 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 300 });
 
-    expect(await within(pane3).findByText("Space Notes.md")).toBeInTheDocument();
-    expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
+    expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument();
+    expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument();
+    expect(document.querySelector(".pane-drag-ghost")).toBeInTheDocument();
+    expect(pane4).toHaveClass("drop-target");
+
+    fireEvent.mouseUp(window, { clientX: 300, clientY: 300 });
+    await waitFor(() => expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument());
+    expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument();
+    expect(await screen.findByText("已移动 P1 到 P4。")).toBeInTheDocument();
+    Reflect.deleteProperty(document, "elementFromPoint");
   });
 
-  it("refreshes every matching source and target folder after pane transfer moves", async () => {
+  it("shows a fixed grouped context menu for the right-clicked item", async () => {
     const user = userEvent.setup();
-    const homePath = "C:\\Users\\Traveler";
-    const downloadsPath = `${homePath}\\Downloads`;
-    writeWorkspaceWithPanePaths([homePath, homePath, downloadsPath, `${homePath}\\Documents`]);
-    render(<App />);
-
-    const pane1 = await screen.findByLabelText("Pane 1");
-    const pane2 = await screen.findByLabelText("Pane 2");
-    const pane3 = await screen.findByLabelText("Pane 3");
-    await waitFor(() => expect(within(pane1).getByText("Desktop")).toBeInTheDocument());
-    await waitFor(() => expect(within(pane2).getByText("Desktop")).toBeInTheDocument());
-    await waitFor(() => expect(within(pane3).getByText("Archive.zip")).toBeInTheDocument());
-
-    await user.click(within(pane1).getByText("Desktop"));
-    await user.click(within(pane1).getAllByRole("button", { name: "P3" })[1]);
-
-    expect(await within(pane3).findByText("Desktop")).toBeInTheDocument();
-    await waitFor(() => expect(within(pane2).queryByText("Desktop")).not.toBeInTheDocument());
-  });
-
-  it("applies context menu file actions to the pane that opened the menu", async () => {
-    const user = userEvent.setup();
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed Todo.txt");
+    const api = getSpaceApi();
+    const revealPath = vi.fn().mockResolvedValue({ ok: true, message: "Revealed." });
+    const runSvnCommand = vi.fn().mockResolvedValue({ ok: true, message: "SVN command started." });
+    const systemContextMenu = vi.fn().mockResolvedValue({ ok: true, message: "Opened system context menu." });
+    window.spaceAPI = { ...api, revealPath, runSvnCommand, showSystemContextMenu: systemContextMenu };
     render(<App />);
 
     const pane1 = await screen.findByLabelText("Pane 1");
@@ -617,77 +691,57 @@ describe("App", () => {
     await waitFor(() => expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument());
 
     await user.click(within(pane1).getByText("Space Notes.md"));
-    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"));
-    const contextMenu = document.querySelector(".context-menu");
-    expect(contextMenu).not.toBeNull();
-    await user.click(within(contextMenu as HTMLElement).getByRole("button", { name: "Rename" }));
+    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"), {
+      clientX: 12,
+      clientY: 34,
+      screenX: 112,
+      screenY: 134
+    });
 
-    expect(await within(pane2).findByText("Renamed Todo.txt")).toBeInTheDocument();
-    expect(within(pane2).queryByText("Todo.txt")).not.toBeInTheDocument();
+    const menu = await screen.findByRole("menu", { name: "文件操作菜单" });
+    await waitFor(() => expect(within(menu).getByRole("menuitem", { name: "复制" })).not.toBeDisabled());
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "打开",
+      "复制",
+      "剪切",
+      "粘贴",
+      "放入暂存架",
+      "添加到快捷入口",
+      "资源管理器打开所在位置",
+      "SVN Update",
+      "SVN Commit",
+      "新建"
+    ]);
+    expect(menu.querySelectorAll("hr")).toHaveLength(3);
+    expect(within(pane2).getByText("Todo.txt").closest("button")).toHaveClass("selected");
     expect(within(pane1).getByText("Space Notes.md")).toBeInTheDocument();
-    promptSpy.mockRestore();
-  });
 
-  it("saves and loads batch rename presets", async () => {
-    const user = userEvent.setup();
-    render(<App />);
+    await user.click(within(menu).getByRole("menuitem", { name: "资源管理器打开所在位置" }));
+    await waitFor(() => expect(revealPath).toHaveBeenCalledWith("C:\\Users\\Traveler\\Desktop\\Todo.txt"));
+    expect(systemContextMenu).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu", { name: "文件操作菜单" })).not.toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
-    await user.click(screen.getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Batch rename"));
+    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"), { clientX: 16, clientY: 40 });
+    await user.click(await screen.findByRole("menuitem", { name: "SVN Update" }));
+    await waitFor(() =>
+      expect(runSvnCommand).toHaveBeenCalledWith({
+        path: "C:\\Users\\Traveler\\Desktop\\Todo.txt",
+        command: "update"
+      })
+    );
 
-    const dialog = screen.getByRole("dialog", { name: "Batch rename" });
-    const formatInput = within(dialog).getByLabelText("Format");
-    fireEvent.change(formatInput, { target: { value: "note-{n}" } });
-    await user.type(within(dialog).getByLabelText("Preset name"), "Numbered Notes");
-    await user.click(within(dialog).getByRole("button", { name: "Save Preset" }));
+    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"), { clientX: 16, clientY: 40 });
+    await user.click(await screen.findByRole("menuitem", { name: "SVN Commit" }));
+    await waitFor(() =>
+      expect(runSvnCommand).toHaveBeenCalledWith({
+        path: "C:\\Users\\Traveler\\Desktop\\Todo.txt",
+        command: "commit"
+      })
+    );
 
-    await waitFor(() => {
-      const presets = readSavedWorkspace()?.workspaces[0]?.batchRenamePresets;
-      expect(presets).toHaveLength(1);
-      expect(presets?.[0].name).toBe("Numbered Notes");
-      expect(presets?.[0].rule.pattern).toBe("note-{n}");
-    });
-
-    const presetId = readSavedWorkspace()?.workspaces[0]?.batchRenamePresets?.[0].id;
-    expect(presetId).toBeDefined();
-    fireEvent.change(formatInput, { target: { value: "changed-{n}" } });
-    fireEvent.change(within(dialog).getByLabelText("Preset"), { target: { value: presetId } });
-    expect(formatInput).toHaveValue("note-{n}");
-
-    await user.click(within(dialog).getByRole("button", { name: "Delete Preset" }));
-    await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.batchRenamePresets).toHaveLength(0));
-  });
-
-  it("records and clears batch rename history", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    const pane = await screen.findByLabelText("Pane 1");
-    await waitFor(() => expect(within(pane).getByText("Space Notes.md")).toBeInTheDocument());
-    await user.click(within(pane).getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Batch rename"));
-
-    const dialog = screen.getByRole("dialog", { name: "Batch rename" });
-    fireEvent.change(within(dialog).getByLabelText("Format"), { target: { value: "history-{n}" } });
-    await user.click(within(dialog).getByRole("button", { name: "Rename" }));
-
-    await waitFor(() => {
-      const history = readSavedWorkspace()?.workspaces[0]?.batchRenameHistory;
-      expect(history).toHaveLength(1);
-      expect(history?.[0].rule.pattern).toBe("history-{n}");
-      expect(history?.[0].changedCount).toBe(1);
-    });
-
-    await user.click(within(pane).getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Batch rename"));
-    const nextDialog = screen.getByRole("dialog", { name: "Batch rename" });
-    const historyRegion = within(nextDialog).getByRole("region", { name: "Rename history" });
-    expect(within(historyRegion).getByText("Renamed 1 item(s).")).toBeInTheDocument();
-
-    await user.click(within(historyRegion).getByRole("button", { name: "Clear History" }));
-    await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.batchRenameHistory).toHaveLength(0));
-    expect(within(historyRegion).getByText("No batch rename operations recorded yet.")).toBeInTheDocument();
+    fireEvent.contextMenu(within(pane2).getByText("Todo.txt"), { clientX: 16, clientY: 40 });
+    await user.click(await screen.findByRole("menuitem", { name: "新建" }));
+    expect(await screen.findByRole("dialog", { name: "新建文件" })).toBeInTheDocument();
   });
 
   it("saves and loads folder sync presets", async () => {
@@ -695,13 +749,13 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("Folder sync"));
+    await clickToolbarOverflowAction(user, "文件夹同步");
 
-    const dialog = screen.getByRole("dialog", { name: "Folder sync" });
-    fireEvent.change(within(dialog).getByLabelText("Direction"), { target: { value: "updateBoth" } });
-    fireEvent.change(within(dialog).getByLabelText("Filter"), { target: { value: "Mock" } });
-    fireEvent.change(within(dialog).getByLabelText("Preset name"), { target: { value: "Mirror Mock" } });
-    await user.click(within(dialog).getByRole("button", { name: "Save Preset" }));
+    const dialog = screen.getByRole("dialog", { name: "文件夹同步" });
+    fireEvent.change(within(dialog).getByLabelText("同步方向"), { target: { value: "updateBoth" } });
+    fireEvent.change(within(dialog).getByLabelText("过滤"), { target: { value: "Mock" } });
+    fireEvent.change(within(dialog).getByLabelText("预设名称"), { target: { value: "Mirror Mock" } });
+    await user.click(within(dialog).getByRole("button", { name: "保存预设" }));
 
     await waitFor(() => {
       const presets = readSavedWorkspace()?.workspaces[0]?.folderSyncPresets;
@@ -713,16 +767,16 @@ describe("App", () => {
 
     const presetId = readSavedWorkspace()?.workspaces[0]?.folderSyncPresets?.[0].id;
     expect(presetId).toBeDefined();
-    fireEvent.change(within(dialog).getByLabelText("Direction"), { target: { value: "updateLeft" } });
-    fireEvent.change(within(dialog).getByLabelText("Filter"), { target: { value: "Other" } });
-    fireEvent.change(within(dialog).getByLabelText("Left path"), { target: { value: "C:\\Changed" } });
-    fireEvent.change(within(dialog).getByLabelText("Preset"), { target: { value: presetId } });
+    fireEvent.change(within(dialog).getByLabelText("同步方向"), { target: { value: "updateLeft" } });
+    fireEvent.change(within(dialog).getByLabelText("过滤"), { target: { value: "Other" } });
+    fireEvent.change(within(dialog).getByLabelText("左侧路径"), { target: { value: "C:\\Changed" } });
+    fireEvent.change(within(dialog).getByLabelText("预设"), { target: { value: presetId } });
 
-    expect(within(dialog).getByLabelText("Direction")).toHaveValue("updateBoth");
-    expect(within(dialog).getByLabelText("Filter")).toHaveValue("Mock");
-    expect(within(dialog).getByLabelText("Left path")).toHaveValue("C:\\Users\\Traveler");
+    expect(within(dialog).getByLabelText("同步方向")).toHaveValue("updateBoth");
+    expect(within(dialog).getByLabelText("过滤")).toHaveValue("Mock");
+    expect(within(dialog).getByLabelText("左侧路径")).toHaveValue("C:\\Users\\Traveler");
 
-    await user.click(within(dialog).getByRole("button", { name: "Delete Preset" }));
+    await user.click(within(dialog).getByRole("button", { name: "删除预设" }));
     await waitFor(() => expect(readSavedWorkspace()?.workspaces[0]?.folderSyncPresets).toHaveLength(0));
   });
 
@@ -732,15 +786,15 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByText("Space Notes.md")).toBeInTheDocument());
     await user.click(screen.getByText("Space Notes.md"));
-    await user.click(screen.getByLabelText("Add selection to shelf"));
+    await clickToolbarOverflowAction(user, "加入暂存架");
 
     const shelf = screen.getByRole("region", { name: "Stash Shelf" });
     expect(within(shelf).getByText("Space Notes.md")).toBeInTheDocument();
 
-    await user.click(within(shelf).getByRole("button", { name: "Hash" }));
+    await user.click(within(shelf).getByRole("button", { name: "哈希" }));
     expect(await screen.findByText(/Shelf SHA-256/)).toBeInTheDocument();
 
-    await user.click(within(shelf).getByRole("button", { name: "Clear" }));
+    await user.click(within(shelf).getByRole("button", { name: "清空" }));
     expect(within(shelf).queryByText("Space Notes.md")).not.toBeInTheDocument();
   });
 
@@ -750,103 +804,80 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByText("Archive.tar")).toBeInTheDocument());
     await user.dblClick(screen.getByText("Archive.tar"));
-    expect(screen.getByRole("dialog", { name: "Archive browser" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "归档浏览器" })).toBeInTheDocument();
     expect(screen.getByText("readme.txt")).toBeInTheDocument();
   });
 
   it("creates, renames, and clones workspace tabs", async () => {
     const user = userEvent.setup();
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Design");
+    const promptSpy = vi.spyOn(window, "prompt");
     render(<App />);
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Default" })).toBeInTheDocument());
-    await user.click(screen.getByLabelText("New workspace"));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Workspace 2" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("tab", { name: "默认" })).toBeInTheDocument());
+    await user.click(screen.getByLabelText("新建工作区"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "工作区 2" })).toBeInTheDocument());
 
-    await user.click(screen.getByLabelText("Rename workspace"));
+    await user.click(screen.getByLabelText("重命名工作区"));
+    const renameDialog = screen.getByRole("dialog", { name: "重命名工作区" });
+    expect(promptSpy).not.toHaveBeenCalled();
+    const nameInput = within(renameDialog).getByLabelText("工作区名称");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Design");
+    await user.click(within(renameDialog).getByRole("button", { name: "保存" }));
     expect(screen.getByRole("tab", { name: "Design" })).toBeInTheDocument();
+    await waitFor(() => expect(readSavedWorkspace()?.workspaces.find((workspace) => workspace.name === "Design")).toBeDefined());
 
-    await user.click(screen.getByLabelText("Clone workspace"));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Design Copy" })).toBeInTheDocument());
+    await user.click(screen.getByLabelText("复制工作区"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Design 副本" })).toBeInTheDocument());
     promptSpy.mockRestore();
   });
 
-  it("adds color rules and highlights matching entries", async () => {
+  it("opens Windows Terminal from the active pane without the retired quick launch panel", async () => {
     const user = userEvent.setup();
-    render(<App />);
-
-    await waitFor(() => expect(screen.getByText("Archive.zip")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("Color rules"));
-
-    const dialog = screen.getByRole("dialog", { name: "Color rules" });
-    await user.click(within(dialog).getByRole("button", { name: "Add Rule" }));
-    await user.click(within(dialog).getByRole("button", { name: "Save Rules" }));
-
-    await waitFor(() => expect(screen.getByText("Archive.zip").closest("button")).toHaveClass("colorized"));
-    await user.click(screen.getAllByLabelText("Icon view")[2]);
-    await waitFor(() => expect(screen.getByText("Archive.zip").closest("button")).toHaveClass("colorized"));
-  });
-
-  it("runs Quick Launch items and opens the settings panel", async () => {
-    const user = userEvent.setup();
+    const api = getSpaceApi();
+    const openTerminal = vi.fn().mockResolvedValue({ ok: true, message: "Opened Windows Terminal in C:\\Users\\Traveler." });
+    window.spaceAPI = { ...api, openTerminal };
     render(<App />);
 
     await waitFor(() => expect(screen.getByLabelText("Pane 1")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("Quick launch"));
+    await user.click(screen.getByLabelText("Windows Terminal"));
 
-    const panel = screen.getByRole("region", { name: "Quick Launch" });
-    expect(within(panel).getByText("PowerShell Here")).toBeInTheDocument();
-    await user.click(within(panel).getByRole("button", { name: "PowerShell Here" }));
-    expect(await screen.findByText("Launched PowerShell Here.")).toBeInTheDocument();
-
-    await user.click(screen.getByLabelText("Quick launch"));
-    await user.click(within(screen.getByRole("region", { name: "Quick Launch" })).getByRole("button", { name: "Manage" }));
-    expect(screen.getByRole("dialog", { name: "Quick Launch settings" })).toBeInTheDocument();
+    await waitFor(() => expect(openTerminal).toHaveBeenCalledWith("C:\\Users\\Traveler"));
+    expect(await screen.findByText("Opened Windows Terminal in C:\\Users\\Traveler.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "快速启动" })).not.toBeInTheDocument();
   });
 
-  it("customizes toolbar and context menu actions", async () => {
+  it("customizes toolbar actions and hotkeys", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText("Customize actions")).toBeInTheDocument());
-    await user.click(screen.getByLabelText("Customize actions"));
+    await waitFor(() => expect(screen.getByLabelText("自定义动作")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("自定义动作"));
 
-    const dialog = screen.getByRole("dialog", { name: "Customize actions" });
-    const toolbarGroup = within(dialog).getByRole("group", { name: "Toolbar" });
-    await user.click(within(toolbarGroup).getByLabelText("Delete"));
-    fireEvent.change(within(dialog).getByLabelText("Workspace Search hotkey"), { target: { value: "ctrl+alt+w" } });
-    await user.click(within(dialog).getByRole("button", { name: "Save Settings" }));
+    const dialog = screen.getByRole("dialog", { name: "自定义动作" });
+    expect(within(dialog).getByText("调整工具栏按钮和快捷键；右键菜单固定使用 Space 分组菜单。")).toBeInTheDocument();
+    const toolbarGroup = within(dialog).getByRole("group", { name: "工具栏" });
+    await user.click(within(toolbarGroup).getByLabelText("删除"));
+    expect(within(dialog).queryByLabelText("工作区搜索 hotkey")).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("文件夹同步 hotkey"), { target: { value: "ctrl+alt+f" } });
+    await user.click(within(dialog).getByRole("button", { name: "保存设置" }));
 
-    expect(screen.queryByLabelText("Delete")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("删除")).not.toBeInTheDocument();
     await waitFor(() => {
       const workspace = readSavedWorkspace()?.workspaces[0];
       const toolbarIds = workspace?.toolbarActionIds;
       expect(toolbarIds).toBeDefined();
       expect(toolbarIds).not.toContain("delete");
-      expect(workspace?.hotkeyBindings).toContainEqual({ actionId: "workspaceSearch", shortcut: "Ctrl+Alt+W" });
+      expect(workspace?.hotkeyBindings).toContainEqual({ actionId: "folderSync", shortcut: "Ctrl+Alt+F" });
     });
 
-    const shell = screen.getByText("Four-pane file manager").closest("main");
+    const shell = screen.getByText("四窗格资源管理器").closest("main");
     expect(shell).not.toBeNull();
-    fireEvent.keyDown(shell!, { key: "w", ctrlKey: true, altKey: true });
-    expect(screen.getByRole("dialog", { name: "Workspace search" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.keyDown(shell!, { key: "f", ctrlKey: true, altKey: true });
+    const syncDialog = screen.getByRole("dialog", { name: "文件夹同步" });
+    expect(syncDialog).toBeInTheDocument();
+    await user.click(within(syncDialog).getByRole("button", { name: "关闭" }));
 
-    await user.click(screen.getByLabelText("Customize actions"));
-    const secondDialog = screen.getByRole("dialog", { name: "Customize actions" });
-    const contextGroup = within(secondDialog).getByRole("group", { name: "Context Menu" });
-    await user.click(within(contextGroup).getByLabelText("Delete"));
-    await user.click(within(secondDialog).getByRole("button", { name: "Save Settings" }));
-    await waitFor(() => {
-      const contextMenuIds = readSavedWorkspace()?.workspaces[0]?.contextMenuActionIds;
-      expect(contextMenuIds).toBeDefined();
-      expect(contextMenuIds).not.toContain("delete");
-    });
-
-    fireEvent.contextMenu(screen.getByText("Space Notes.md"));
-    const contextMenu = document.querySelector(".context-menu");
-    expect(contextMenu).not.toBeNull();
-    expect(within(contextMenu as HTMLElement).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(within(contextMenu as HTMLElement).getByRole("button", { name: "Quick Launch..." })).toBeInTheDocument();
+    expect(document.querySelector(".context-menu")).toBeNull();
   });
 });

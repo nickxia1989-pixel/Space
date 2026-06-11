@@ -32,11 +32,11 @@ import { pathName, parentPath } from "./pathUtils";
 const now = Date.now();
 const mockHome = "C:\\Users\\Traveler";
 const mockKnownLocations: KnownLocation[] = [
-  { id: "home", label: "Home", path: mockHome, icon: "home" },
-  { id: "desktop", label: "Desktop", path: `${mockHome}\\Desktop`, icon: "monitor" },
-  { id: "documents", label: "Documents", path: `${mockHome}\\Documents`, icon: "file-text" },
-  { id: "downloads", label: "Downloads", path: `${mockHome}\\Downloads`, icon: "download" },
-  { id: "pictures", label: "Pictures", path: `${mockHome}\\Pictures`, icon: "image" }
+  { id: "home", label: "主页", path: mockHome, icon: "home" },
+  { id: "desktop", label: "桌面", path: `${mockHome}\\Desktop`, icon: "monitor" },
+  { id: "documents", label: "文档", path: `${mockHome}\\Documents`, icon: "file-text" },
+  { id: "downloads", label: "下载", path: `${mockHome}\\Downloads`, icon: "download" },
+  { id: "pictures", label: "图片", path: `${mockHome}\\Pictures`, icon: "image" }
 ];
 
 const mockWorkspaceStorageKey = "space.mock.workspace";
@@ -100,7 +100,7 @@ function createMockEntry(parent: string, name: string, isDirectory: boolean, siz
     modifiedAt: now - Math.floor(Math.random() * 100000000),
     createdAt: now - 200000000,
     extension,
-    typeLabel: isDirectory ? "Folder" : extension ? `${extension.slice(1).toUpperCase()} File` : "File",
+    typeLabel: isDirectory ? "文件夹" : extension ? `${extension.slice(1).toUpperCase()} 文件` : "文件",
     hidden: name.startsWith(".")
   };
 }
@@ -200,6 +200,36 @@ function findMockEntry(sourcePath: string): FileEntry | null {
 
 function mockPathExists(targetPath: string): boolean {
   return !!findMockEntry(targetPath) || mockEntries.has(targetPath);
+}
+
+function getMockChildren(directoryPath: string): FileEntry[] {
+  const directChildren = mockEntries.get(directoryPath);
+  if (directChildren) return directChildren;
+  const matchingKey = [...mockEntries.keys()].find((key) => mockPathEquals(key, directoryPath));
+  return matchingKey ? mockEntries.get(matchingKey) ?? [] : [];
+}
+
+function searchMockFiles(options: SearchOptions): FileEntry[] {
+  seedMockEntries();
+  const query = options.query.trim().toLowerCase();
+  if (!query) return [];
+  const limit = Math.max(1, Math.min(options.limit || 250, 1000));
+  const results: FileEntry[] = [];
+
+  function scan(directoryPath: string): void {
+    if (results.length >= limit) return;
+    const entries = [...getMockChildren(directoryPath)].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
+    );
+    for (const entry of entries) {
+      if (results.length >= limit) return;
+      if (entry.name.toLowerCase().includes(query)) results.push(entry);
+      if (options.recursive && entry.isDirectory) scan(entry.path);
+    }
+  }
+
+  scan(options.rootPath);
+  return results;
 }
 
 function addMockEntry(parent: string, entry: FileEntry): void {
@@ -325,16 +355,17 @@ function createBrowserMockApi(): SpaceApi {
       return {
         homePath: mockHome,
         knownLocations: mockKnownLocations,
-        drives: [{ name: "C:", path: "C:\\" }, { name: "D:", path: "D:\\" }]
+        drives: [
+          { name: "C:", path: "C:\\", label: "系统", freeBytes: 64 * 1024 ** 3, totalBytes: 256 * 1024 ** 3 },
+          { name: "D:", path: "D:\\", label: "数据", freeBytes: 700 * 1024 ** 3, totalBytes: 1024 * 1024 ** 3 }
+        ]
       };
     },
     async listDirectory(path: string) {
       return mockList(path || mockHome);
     },
     async searchFiles(options: SearchOptions) {
-      seedMockEntries();
-      const query = options.query.toLowerCase();
-      return [...mockEntries.values()].flat().filter((entry) => entry.name.toLowerCase().includes(query));
+      return searchMockFiles(options);
     },
     async suggestPaths(request: PathSuggestionRequest) {
       return mockSuggestPaths(request);
@@ -524,7 +555,7 @@ function createBrowserMockApi(): SpaceApi {
       return mockResult(`Revealed ${path}.`, [path]);
     },
     async openTerminal(path: string) {
-      return mockResult(`Opened terminal in ${path}.`, [path]);
+      return mockResult(`Opened Windows Terminal in ${path}.`, [path]);
     },
     async copyTextToClipboard(text: string) {
       const storage = getMockStorage();
@@ -541,12 +572,27 @@ function createBrowserMockApi(): SpaceApi {
     async runQuickLaunch(request) {
       return mockResult(`Launched ${request.item.label}.`, [request.currentPath, ...request.selectedPaths]);
     },
+    async runSvnCommand(request) {
+      return mockResult(`SVN ${request.command} started for ${request.path}.`, [request.path]);
+    },
+    async showSystemContextMenu(request) {
+      return mockResult(`Opened system context menu for ${request.path}.`, [request.path]);
+    },
     async getWorkspace() {
       return loadMockWorkspace();
     },
     async saveWorkspace(snapshot: WorkspaceDocument) {
       saveMockWorkspace(snapshot);
       return mockResult("Workspace saved.");
+    },
+    async minimizeWindow() {
+      return mockResult("Window minimized.");
+    },
+    async toggleMaximizeWindow() {
+      return mockResult("Window toggled.");
+    },
+    async closeWindow() {
+      return mockResult("Window closed.");
     }
   };
 }
