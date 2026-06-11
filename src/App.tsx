@@ -4182,7 +4182,13 @@ function WorkspaceRenameModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal workspace-rename-modal" role="dialog" aria-modal="true" aria-label="重命名工作区">
+      <section
+        className="modal workspace-rename-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="重命名工作区"
+        onKeyDown={(event) => event.stopPropagation()}
+      >
         <header className="modal-header">
           <div>
             <h2>重命名工作区</h2>
@@ -4200,7 +4206,13 @@ function WorkspaceRenameModal({
         >
           <label>
             工作区名称
-            <input value={name} autoFocus onChange={(event) => setName(event.target.value)} spellCheck={false} />
+            <input
+              value={name}
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setName(event.target.value)}
+              spellCheck={false}
+            />
           </label>
           <footer className="modal-footer">
             <button type="button" onClick={onClose}>

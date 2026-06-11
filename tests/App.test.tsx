@@ -827,6 +827,9 @@ describe("App", () => {
     const renameDialog = screen.getByRole("dialog", { name: "重命名工作区" });
     expect(promptSpy).not.toHaveBeenCalled();
     const nameInput = within(renameDialog).getByLabelText("工作区名称");
+    expect(screen.getByLabelText("Pane 1")).toHaveClass("active");
+    fireEvent.keyDown(nameInput, { key: "Tab" });
+    expect(screen.getByLabelText("Pane 1")).toHaveClass("active");
     await user.clear(nameInput);
     await user.type(nameInput, "Design");
     await user.click(within(renameDialog).getByRole("button", { name: "保存" }));
