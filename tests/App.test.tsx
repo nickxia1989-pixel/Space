@@ -339,7 +339,7 @@ describe("App", () => {
     const user = userEvent.setup();
     const homePath = "C:\\Users\\Traveler";
     writeWorkspaceWithPanePaths([homePath, homePath, `${homePath}\\Downloads`, `${homePath}\\Documents`]);
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Shared Folder");
+    const promptSpy = vi.spyOn(window, "prompt");
     render(<App />);
 
     const pane1 = await screen.findByLabelText("Pane 1");
@@ -348,6 +348,12 @@ describe("App", () => {
     await waitFor(() => expect(within(pane2).getByText("Space Notes.md")).toBeInTheDocument());
 
     await user.click(screen.getByLabelText("新建文件夹"));
+    const dialog = screen.getByRole("dialog", { name: "新建文件夹" });
+    expect(promptSpy).not.toHaveBeenCalled();
+    const nameInput = within(dialog).getByLabelText("文件夹名称");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Shared Folder");
+    await user.click(within(dialog).getByRole("button", { name: "创建" }));
 
     expect(await within(pane1).findByText("Shared Folder")).toBeInTheDocument();
     expect(await within(pane2).findByText("Shared Folder")).toBeInTheDocument();

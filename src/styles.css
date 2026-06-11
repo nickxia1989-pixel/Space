@@ -1324,16 +1324,19 @@ button:disabled {
   padding: 14px 16px 8px;
 }
 
+.simple-name-modal,
 .workspace-rename-modal {
   width: min(460px, 100%);
 }
 
+.simple-name-form,
 .workspace-rename-form {
   display: grid;
   gap: 14px;
   padding: 16px;
 }
 
+.simple-name-form label,
 .workspace-rename-form label {
   display: grid;
   gap: 6px;
@@ -1341,11 +1344,13 @@ button:disabled {
   font-size: 12px;
 }
 
+.simple-name-form input,
 .workspace-rename-form input {
   height: 34px;
   padding: 0 10px;
 }
 
+.simple-name-form .modal-footer,
 .workspace-rename-form .modal-footer {
   margin: 2px -16px -16px;
 }
@@ -2662,6 +2667,7 @@ textarea {
   color: #1f2937;
 }
 
+.simple-name-form label,
 .workspace-rename-form label {
   color: #475569;
 }

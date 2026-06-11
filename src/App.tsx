@@ -926,6 +926,7 @@ export default function App() {
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [hashLine, setHashLine] = useState<string>("");
   const [newFileOpen, setNewFileOpen] = useState(false);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [colorRulesOpen, setColorRulesOpen] = useState(false);
   const [quickLaunchMenuOpen, setQuickLaunchMenuOpen] = useState(false);
   const [quickLaunchEditorOpen, setQuickLaunchEditorOpen] = useState(false);
@@ -1833,21 +1834,14 @@ export default function App() {
     }
   }
 
-  async function createItem(kind: "file" | "folder") {
+  async function createFolderFromName(name: string) {
     if (!activePane) return;
     const parentPath = activePane.path;
     const refreshIds = operationRefreshIds([activePane.id], [parentPath]);
-    const fallback = kind === "folder" ? "New Folder" : "New File.txt";
-    const name = window.prompt(kind === "folder" ? "Folder name" : "File name", fallback);
-    if (!name) return;
-    await perform(
-      kind === "folder" ? "Create folder" : "Create file",
-      () =>
-        kind === "folder"
-          ? api.createFolder({ parentPath, name })
-          : api.createFile({ parentPath, name }),
-      refreshIds
-    );
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    const result = await perform("Create folder", () => api.createFolder({ parentPath, name: trimmedName }), refreshIds);
+    if (result) setNewFolderOpen(false);
   }
 
   async function createTemplatedFile(request: { name: string; content: string; saveTemplateName?: string }) {
@@ -2206,7 +2200,7 @@ export default function App() {
   }
 
   const toolbarActions: Record<string, { title: string; icon: LucideIcon; onClick: () => void; disabled?: boolean; active?: boolean }> = {
-    newFolder: { title: "新建文件夹", icon: FolderPlus, onClick: () => void createItem("folder") },
+    newFolder: { title: "新建文件夹", icon: FolderPlus, onClick: () => setNewFolderOpen(true) },
     newFile: { title: "新建文件", icon: FilePlus2, onClick: () => setNewFileOpen(true) },
     copy: { title: "复制", icon: Copy, onClick: () => copySelection("copy"), disabled: !activePane?.selectedPaths.length },
     copyPaths: { title: "复制路径", icon: ClipboardCopy, onClick: () => void copySelectedPaths(), disabled: !activePane?.selectedPaths.length },
@@ -2524,6 +2518,14 @@ export default function App() {
           onClose={() => setNewFileOpen(false)}
           onCreate={(request) => void createTemplatedFile(request)}
           onDeleteTemplate={(templateId) => setFileTemplates((current) => current.filter((template) => template.id !== templateId))}
+        />
+      )}
+
+      {newFolderOpen && activePane && (
+        <NewFolderModal
+          destinationPath={activePane.path}
+          onClose={() => setNewFolderOpen(false)}
+          onCreate={(name) => void createFolderFromName(name)}
         />
       )}
 
@@ -4113,6 +4115,54 @@ function NewFileModal({
             创建
           </button>
         </footer>
+      </section>
+    </div>
+  );
+}
+
+function NewFolderModal({
+  destinationPath,
+  onClose,
+  onCreate
+}: {
+  destinationPath: string;
+  onClose: () => void;
+  onCreate: (name: string) => void;
+}) {
+  const [name, setName] = useState("新建文件夹");
+  const trimmedName = name.trim();
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal simple-name-modal" role="dialog" aria-modal="true" aria-label="新建文件夹">
+        <header className="modal-header">
+          <div>
+            <h2>新建文件夹</h2>
+            <span title={destinationPath}>{destinationPath}</span>
+          </div>
+          <button onClick={onClose}>关闭</button>
+        </header>
+
+        <form
+          className="simple-name-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmedName) onCreate(trimmedName);
+          }}
+        >
+          <label>
+            文件夹名称
+            <input value={name} autoFocus onChange={(event) => setName(event.target.value)} spellCheck={false} />
+          </label>
+          <footer className="modal-footer">
+            <button type="button" onClick={onClose}>
+              取消
+            </button>
+            <button className="primary" type="submit" disabled={!trimmedName}>
+              创建
+            </button>
+          </footer>
+        </form>
       </section>
     </div>
   );
