@@ -208,6 +208,37 @@ describe("App", () => {
     expect(within(screen.getByLabelText("Pane 1")).getByPlaceholderText("过滤或搜索")).toBeInTheDocument();
   });
 
+  it("runs pane titlebar directory actions against that pane path", async () => {
+    const user = userEvent.setup();
+    const api = getSpaceApi();
+    const openPath = vi.fn().mockResolvedValue({ ok: true, message: "Opened folder." });
+    const runSvnCommand = vi.fn().mockResolvedValue({ ok: true, message: "SVN command started." });
+    window.spaceAPI = { ...api, openPath, runSvnCommand };
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 2");
+    await waitFor(() => expect(within(pane).getByDisplayValue("C:\\Users\\Traveler\\Desktop")).toBeInTheDocument());
+
+    await user.click(within(pane).getByLabelText("SVN Update"));
+    await waitFor(() =>
+      expect(runSvnCommand).toHaveBeenCalledWith({
+        path: "C:\\Users\\Traveler\\Desktop",
+        command: "update"
+      })
+    );
+
+    await user.click(within(pane).getByLabelText("SVN Commit"));
+    await waitFor(() =>
+      expect(runSvnCommand).toHaveBeenCalledWith({
+        path: "C:\\Users\\Traveler\\Desktop",
+        command: "commit"
+      })
+    );
+
+    await user.click(within(pane).getByLabelText("在资源管理器打开此目录"));
+    await waitFor(() => expect(openPath).toHaveBeenCalledWith("C:\\Users\\Traveler\\Desktop"));
+  });
+
   it("migrates legacy action layouts to include current default actions", async () => {
     const user = userEvent.setup();
     writeLegacyActionWorkspace();

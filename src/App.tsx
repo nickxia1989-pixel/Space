@@ -20,6 +20,7 @@ import {
   FileText,
   FileType,
   Folder,
+  FolderOpen,
   FolderPlus,
   Grid2X2,
   GripVertical,
@@ -47,6 +48,7 @@ import {
   Star,
   Terminal,
   Trash2,
+  Upload,
   X,
   Video,
   Braces,
@@ -2419,6 +2421,9 @@ export default function App() {
               onForward={() => goHistory(pane.id, 1)}
               onUp={() => void loadPane(pane.id, parentPath(pane.path))}
               onRefresh={() => void refreshPane(pane.id)}
+              onSvnUpdate={() => void perform("SVN Update", () => api.runSvnCommand({ path: pane.path, command: "update" }), [pane.id])}
+              onSvnCommit={() => void perform("SVN Commit", () => api.runSvnCommand({ path: pane.path, command: "commit" }), [pane.id])}
+              onOpenDirectory={() => void perform("Open Folder", () => api.openPath(pane.path), [])}
               onAddressChange={(value) => void updateAddressDraft(pane.id, value)}
               onAddressSubmit={() => {
                 clearAddressSuggestions(pane.id);
@@ -3195,6 +3200,9 @@ function ExplorerPane({
   onForward,
   onUp,
   onRefresh,
+  onSvnUpdate,
+  onSvnCommit,
+  onOpenDirectory,
   onAddressChange,
   onAddressSubmit,
   onFilterChange,
@@ -3224,6 +3232,9 @@ function ExplorerPane({
   onForward: () => void;
   onUp: () => void;
   onRefresh: () => void;
+  onSvnUpdate: () => void;
+  onSvnCommit: () => void;
+  onOpenDirectory: () => void;
   onAddressChange: (value: string) => void;
   onAddressSubmit: () => void;
   onFilterChange: (value: string) => void;
@@ -3288,6 +3299,9 @@ function ExplorerPane({
         </div>
 
         <div className="pane-tools">
+          <IconButton title="SVN Update" icon={Download} onClick={onSvnUpdate} />
+          <IconButton title="SVN Commit" icon={Upload} onClick={onSvnCommit} />
+          <IconButton title="在资源管理器打开此目录" icon={FolderOpen} onClick={onOpenDirectory} />
           <IconButton title="过滤/搜索" icon={Search} active={pane.filterVisible || !!pane.filter.trim()} onClick={onToggleFilter} />
           <IconButton title="详细视图" icon={List} active={pane.viewMode === "details"} onClick={() => onViewMode("details")} />
           <IconButton title="图标视图" icon={LayoutGrid} active={pane.viewMode === "icons"} onClick={() => onViewMode("icons")} />
