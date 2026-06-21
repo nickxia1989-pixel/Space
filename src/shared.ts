@@ -27,6 +27,7 @@ export interface FileEntry {
   extension: string;
   typeLabel: string;
   hidden: boolean;
+  systemIconDataUrl?: string;
 }
 
 export interface DirectoryPayload {

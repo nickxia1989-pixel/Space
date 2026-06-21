@@ -138,6 +138,19 @@ function writeLegacyActionWorkspace(): void {
   window.localStorage.setItem("space.mock.workspace", JSON.stringify(document));
 }
 
+function getPaneAddress(pane: HTMLElement, paneId: number): HTMLElement {
+  return within(pane).getByLabelText(`P${paneId} 当前路径`);
+}
+
+function expectPanePath(pane: HTMLElement, paneId: number, filePath: string): void {
+  expect(getPaneAddress(pane, paneId)).toHaveAttribute("title", filePath);
+}
+
+function openPaneAddressEditor(pane: HTMLElement, paneId: number): HTMLInputElement {
+  fireEvent.click(within(pane).getByLabelText(`P${paneId} 编辑地址`));
+  return within(pane).getByLabelText(`P${paneId} 地址`) as HTMLInputElement;
+}
+
 describe("App", () => {
   it("shows a recoverable startup error when the desktop API fails", async () => {
     window.spaceAPI = {
@@ -179,7 +192,9 @@ describe("App", () => {
     expect(screen.getByLabelText("Pane 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 4")).toBeInTheDocument();
-    expect(screen.getAllByDisplayValue("C:\\Users\\Traveler")).toHaveLength(4);
+    for (const paneId of [1, 2, 3, 4]) {
+      expectPanePath(screen.getByLabelText(`Pane ${paneId}`), paneId, "C:\\Users\\Traveler");
+    }
   });
 
   it("renders four explorer panes with default controls", async () => {
@@ -191,6 +206,9 @@ describe("App", () => {
     expect(screen.getByLabelText("Pane 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 3")).toBeInTheDocument();
     expect(screen.getByLabelText("Pane 4")).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/当前路径$/)).toHaveLength(4);
+    expect(screen.queryByLabelText("P1 地址")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("P1 路径层级")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("过滤或搜索")).not.toBeInTheDocument();
     expect(screen.queryByText("Inspector")).not.toBeInTheDocument();
     expect(screen.getByRole("separator", { name: "调整窗格列宽" })).toBeInTheDocument();
@@ -217,7 +235,7 @@ describe("App", () => {
     render(<App />);
 
     const pane = await screen.findByLabelText("Pane 2");
-    await waitFor(() => expect(within(pane).getByDisplayValue("C:\\Users\\Traveler\\Desktop")).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane, 2, "C:\\Users\\Traveler\\Desktop"));
 
     await user.click(within(pane).getByLabelText("SVN Update"));
     await waitFor(() =>
@@ -266,11 +284,49 @@ describe("App", () => {
     expect(screen.getAllByLabelText("图标视图")[0]).toHaveClass("active");
   });
 
+  it("renders system icons supplied by the desktop API", async () => {
+    const api = getSpaceApi();
+    const systemIconDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const listDirectory = vi.fn((targetPath: string) =>
+      Promise.resolve(
+        testDirectory(targetPath, [
+          {
+            ...testEntry(targetPath, "Shell Icon.txt"),
+            systemIconDataUrl
+          }
+        ])
+      )
+    );
+    window.spaceAPI = { ...api, listDirectory };
+
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() =>
+      expect(pane.querySelector(".system-file-icon")).toHaveAttribute("src", systemIconDataUrl)
+    );
+  });
+
+  it("navigates directly from breadcrumb path buttons", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expectPanePath(pane, 1, "C:\\Users\\Traveler"));
+    expect(getPaneAddress(pane, 1).querySelector(".breadcrumb-button.current")).not.toBeInTheDocument();
+    await user.click(within(getPaneAddress(pane, 1)).getByRole("button", { name: "Users" }));
+
+    await waitFor(() => expectPanePath(pane, 1, "C:\\Users"));
+  });
+
   it("suggests matching paths in the address bar", async () => {
     render(<App />);
 
     const pane = await screen.findByLabelText("Pane 1");
-    const addressInput = within(pane).getByDisplayValue("C:\\Users\\Traveler");
+    await waitFor(() => expectPanePath(pane, 1, "C:\\Users\\Traveler"));
+    const addressInput = openPaneAddressEditor(pane, 1);
+    expect(addressInput).toHaveValue("C:\\Users\\Traveler");
     fireEvent.change(addressInput, { target: { value: "C:\\Users\\Traveler\\D" } });
 
     await waitFor(() => {
@@ -281,6 +337,20 @@ describe("App", () => {
         "C:\\Users\\Traveler\\Downloads"
       ]);
     });
+  });
+
+  it("restores the breadcrumb address bar when path editing loses focus", async () => {
+    render(<App />);
+
+    const pane = await screen.findByLabelText("Pane 1");
+    await waitFor(() => expectPanePath(pane, 1, "C:\\Users\\Traveler"));
+    const addressInput = openPaneAddressEditor(pane, 1);
+    fireEvent.change(addressInput, { target: { value: "C:\\Not\\Submitted" } });
+    fireEvent.blur(addressInput, { relatedTarget: document.body });
+
+    await waitFor(() => expect(within(pane).queryByLabelText("P1 地址")).not.toBeInTheDocument());
+    expectPanePath(pane, 1, "C:\\Users\\Traveler");
+    expect(within(getPaneAddress(pane, 1)).getByRole("button", { name: "Traveler" })).toBeInTheDocument();
   });
 
   it("keeps the newest pane navigation result when directory loads finish out of order", async () => {
@@ -318,8 +388,8 @@ describe("App", () => {
 
     const pane = await screen.findByLabelText("Pane 1");
     await waitFor(() => expect(within(pane).getByText("Slow")).toBeInTheDocument());
-    const address = within(pane).getByDisplayValue(homePath);
-    const addressForm = address.closest("form");
+    let address = openPaneAddressEditor(pane, 1);
+    let addressForm = address.closest("form");
     expect(addressForm).not.toBeNull();
 
     fireEvent.change(address, { target: { value: slowPath } });
@@ -336,7 +406,7 @@ describe("App", () => {
       slowDirectory.resolve(testDirectory(slowPath, [testEntry(slowPath, "Slow File.txt")]));
     });
 
-    await waitFor(() => expect(within(pane).getByDisplayValue(fastPath)).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane, 1, fastPath));
     expect(within(pane).getByText("Fast File.txt")).toBeInTheDocument();
     expect(within(pane).queryByText("Slow File.txt")).not.toBeInTheDocument();
   });
@@ -408,7 +478,7 @@ describe("App", () => {
     await user.click(screen.getByLabelText("删除"));
 
     expect(await screen.findByText("Deleted 1 item(s).")).toBeInTheDocument();
-    await waitFor(() => expect(within(pane2).getByDisplayValue(homePath)).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane2, 2, homePath));
     expect(within(pane2).queryByText("Todo.txt")).not.toBeInTheDocument();
     expect(pane1).toHaveClass("active");
     confirmSpy.mockRestore();
@@ -435,7 +505,7 @@ describe("App", () => {
     await user.click(screen.getByLabelText("粘贴"));
 
     expect(await screen.findByText("Moved 1 item(s).")).toBeInTheDocument();
-    await waitFor(() => expect(within(pane2).getByDisplayValue(`${downloadsPath}\\Desktop`)).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane2, 2, `${downloadsPath}\\Desktop`));
     expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument();
     expect(pane3).toHaveClass("active");
   });
@@ -459,7 +529,7 @@ describe("App", () => {
     fireEvent.keyDown(shell!, { key: "F2" });
 
     expect(await screen.findByText("Rename complete.")).toBeInTheDocument();
-    await waitFor(() => expect(within(pane2).getByDisplayValue(`${homePath}\\Projects`)).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane2, 2, `${homePath}\\Projects`));
     expect(within(pane2).getByText("Todo.txt")).toBeInTheDocument();
     expect(pane1).toHaveClass("active");
     promptSpy.mockRestore();
@@ -693,22 +763,22 @@ describe("App", () => {
 
     const pane1 = await screen.findByLabelText("Pane 1");
     const pane4 = await screen.findByLabelText("Pane 4");
-    await waitFor(() => expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument());
-    await waitFor(() => expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument());
+    await waitFor(() => expectPanePath(pane1, 1, "C:\\Users\\Traveler"));
+    await waitFor(() => expectPanePath(pane4, 4, "C:\\Users\\Traveler\\Documents"));
 
     const elementFromPoint = vi.fn(() => pane4);
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
     fireEvent.mouseDown(within(pane1).getByLabelText("拖动交换 P1"), { button: 0, clientX: 20, clientY: 20 });
     fireEvent.mouseMove(window, { clientX: 300, clientY: 300 });
 
-    expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument();
-    expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument();
+    expectPanePath(pane1, 1, "C:\\Users\\Traveler");
+    expectPanePath(pane4, 4, "C:\\Users\\Traveler\\Documents");
     expect(document.querySelector(".pane-drag-ghost")).toBeInTheDocument();
     expect(pane4).toHaveClass("drop-target");
 
     fireEvent.mouseUp(window, { clientX: 300, clientY: 300 });
-    await waitFor(() => expect(within(pane1).getByDisplayValue("C:\\Users\\Traveler\\Documents")).toBeInTheDocument());
-    expect(within(pane4).getByDisplayValue("C:\\Users\\Traveler")).toBeInTheDocument();
+    await waitFor(() => expectPanePath(pane1, 1, "C:\\Users\\Traveler\\Documents"));
+    expectPanePath(pane4, 4, "C:\\Users\\Traveler");
     expect(await screen.findByText("已移动 P1 到 P4。")).toBeInTheDocument();
     Reflect.deleteProperty(document, "elementFromPoint");
   });

@@ -1,6 +1,8 @@
 import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   calculateHash,
   copyItems,
@@ -39,6 +41,7 @@ import type {
   FileOperationRequest,
   FolderSyncRequest,
   HashRequest,
+  FileEntry,
   PathSuggestionRequest,
   QuickLaunchRunRequest,
   RenameRequest,
@@ -50,8 +53,140 @@ import type {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execFileAsync = promisify(execFile);
 let mainWindow: BrowserWindow | null = null;
 let workspaceStore: WorkspaceStore;
+const systemIconCache = new Map<string, string | null>();
+const maxSystemIconCacheEntries = 2500;
+const systemIconTimeoutMs = 750;
+const genericFolderIconTimeoutMs = 1700;
+let genericFolderIconPromise: Promise<string | undefined> | null = null;
+
+function timeout<T>(milliseconds: number, value: T): Promise<T> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(value), milliseconds);
+  });
+}
+
+function isWindowsDriveRoot(filePath: string): boolean {
+  return /^[A-Za-z]:\\?$/.test(filePath);
+}
+
+function getPowerShellExecutable(): string {
+  const systemRoot = process.env.SystemRoot;
+  return systemRoot ? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+}
+
+async function loadGenericFolderIconDataUrl(): Promise<string | undefined> {
+  if (process.platform !== "win32") return undefined;
+  const script = `
+$ErrorActionPreference = 'Stop';
+Add-Type -AssemblyName System.Drawing;
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class SpaceShellIcon {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct SHFILEINFO {
+    public IntPtr hIcon;
+    public int iIcon;
+    public uint dwAttributes;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+    public string szDisplayName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+    public string szTypeName;
+  }
+  [DllImport("Shell32.dll", CharSet = CharSet.Unicode)]
+  public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool DestroyIcon(IntPtr hIcon);
+}
+"@;
+$info = New-Object SpaceShellIcon+SHFILEINFO;
+$flags = 0x000000100 -bor 0x000000001 -bor 0x000000010;
+$attrs = 0x00000010;
+$infoSize = [Runtime.InteropServices.Marshal]::SizeOf($info);
+[void][SpaceShellIcon]::SHGetFileInfo('folder', $attrs, [ref]$info, $infoSize, $flags);
+if ($info.hIcon -eq [IntPtr]::Zero) { return; }
+$icon = [System.Drawing.Icon]::FromHandle($info.hIcon);
+$bitmap = $icon.ToBitmap();
+$stream = New-Object System.IO.MemoryStream;
+$bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png);
+[SpaceShellIcon]::DestroyIcon($info.hIcon) | Out-Null;
+'data:image/png;base64,' + [Convert]::ToBase64String($stream.ToArray());
+`;
+  try {
+    const { stdout } = await execFileAsync(
+      getPowerShellExecutable(),
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { windowsHide: true, timeout: 1500, maxBuffer: 256 * 1024 }
+    );
+    const dataUrl = stdout.trim();
+    return dataUrl.startsWith("data:image/png;base64,") ? dataUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getGenericFolderIconDataUrl(): Promise<string | undefined> {
+  genericFolderIconPromise ??= loadGenericFolderIconDataUrl();
+  return genericFolderIconPromise;
+}
+
+async function getSystemIconDataUrl(entry: FileEntry): Promise<string | undefined> {
+  const cacheKey = entry.path.toLowerCase();
+  if (systemIconCache.has(cacheKey)) return systemIconCache.get(cacheKey) ?? undefined;
+  if (systemIconCache.size > maxSystemIconCacheEntries) systemIconCache.clear();
+
+  if (entry.isDirectory && !isWindowsDriveRoot(entry.path)) {
+    const timedOut = "__space_folder_icon_timeout__";
+    const folderIcon = await Promise.race([getGenericFolderIconDataUrl(), timeout(genericFolderIconTimeoutMs, timedOut)]);
+    if (folderIcon === timedOut) return undefined;
+    systemIconCache.set(cacheKey, folderIcon || null);
+    return folderIcon || undefined;
+  }
+
+  try {
+    const iconRequest = app
+      .getFileIcon(entry.path, { size: "small" })
+      .then((icon) => (icon.isEmpty() ? undefined : icon.toDataURL()))
+      .catch(() => undefined);
+    const dataUrl = await Promise.race([iconRequest, timeout(systemIconTimeoutMs, undefined)]);
+    systemIconCache.set(cacheKey, dataUrl || null);
+    return dataUrl || undefined;
+  } catch {
+    systemIconCache.set(cacheKey, null);
+    return undefined;
+  }
+}
+
+async function attachSystemIcons(entries: FileEntry[]): Promise<FileEntry[]> {
+  const withIcons: FileEntry[] = [];
+  const batchSize = 32;
+  for (let index = 0; index < entries.length; index += batchSize) {
+    const batch = entries.slice(index, index + batchSize);
+    const enriched = await Promise.all(
+      batch.map(async (entry) => ({
+        ...entry,
+        systemIconDataUrl: await getSystemIconDataUrl(entry)
+      }))
+    );
+    withIcons.push(...enriched);
+  }
+  return withIcons;
+}
+
+async function listDirectoryWithSystemIcons(directoryPath: string) {
+  const payload = await listDirectory(directoryPath);
+  return {
+    ...payload,
+    entries: await attachSystemIcons(payload.entries)
+  };
+}
+
+async function searchFilesWithSystemIcons(options: SearchOptions) {
+  return attachSystemIcons(await searchFiles(options));
+}
 
 async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
   try {
@@ -62,8 +197,9 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
           const root = document.querySelector("#root");
           const paneCount = document.querySelectorAll("[aria-label^='Pane ']").length;
           const appShell = document.querySelector(".app-shell");
+          const loadingCount = document.querySelectorAll('.pane-overlay').length;
           const bodyText = document.body?.innerText?.trim() ?? "";
-          if (appShell && paneCount === 4) {
+          if (appShell && paneCount === 4 && loadingCount === 0) {
             const toolbarButtons = Array.from(document.querySelectorAll('.toolbar .icon-button'));
             const toolbarLabels = toolbarButtons.map((button) => ({
               aria: button.getAttribute('aria-label') ?? '',
@@ -72,9 +208,9 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
             const retiredButtons = ['批量重命名', '颜色规则', '快速启动', '工作区搜索'].filter((label) =>
               document.querySelector('.toolbar [aria-label="' + label + '"]')
             );
-            const breadcrumbCounts = Array.from(document.querySelectorAll('.explorer-pane .breadcrumbs')).map(
-              (node) => node.querySelectorAll('button').length
-            );
+            const breadcrumbAddressCount = document.querySelectorAll('.explorer-pane .breadcrumb-address').length;
+            const retiredPathButtons = document.querySelectorAll('.explorer-pane .path-menu-trigger').length;
+            const visibleAddressInputs = document.querySelectorAll('.explorer-pane .address-row input').length;
             const newFileButton = document.querySelector('.toolbar [aria-label="新建文件"]');
             newFileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             window.setTimeout(() => {
@@ -90,15 +226,18 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
                 toolbarLabels.some((button) => !button.text) ? 'toolbar buttons need text labels' : '',
                 retiredButtons.length ? 'retired toolbar buttons still visible: ' + retiredButtons.join(', ') : '',
                 toolbarLabels.some((button) => button.aria === 'Windows Terminal') ? '' : 'Windows Terminal toolbar button missing',
-                breadcrumbCounts.some((count) => count > 3) ? 'breadcrumbs are not compact' : '',
+                breadcrumbAddressCount === 4 ? '' : 'merged breadcrumb address bars missing',
+                retiredPathButtons ? 'retired path dropdown still visible' : '',
+                visibleAddressInputs ? 'traditional address input visible by default' : '',
                 missingTemplates.length ? 'missing templates: ' + missingTemplates.join(', ') : '',
                 retiredTemplates.length ? 'retired templates still visible: ' + retiredTemplates.join(', ') : ''
               ].filter(Boolean);
               resolve({
                 ok: failures.length === 0,
                 paneCount,
+                loadingCount,
                 toolbarLabels,
-                breadcrumbCounts,
+                breadcrumbAddressCount,
                 templateText,
                 failures,
                 bodyText: bodyText.slice(0, 240)
@@ -110,6 +249,7 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
             resolve({
               ok: false,
               paneCount,
+              loadingCount,
               rootChildren: root?.childElementCount ?? -1,
               bodyText: bodyText.slice(0, 500),
               scripts: Array.from(document.scripts).map((script) => script.src)
@@ -178,8 +318,8 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle("space:bootstrap", () => getBootstrap());
-  ipcMain.handle("space:list-directory", (_event, directoryPath: string) => listDirectory(directoryPath));
-  ipcMain.handle("space:search-files", (_event, options: SearchOptions) => searchFiles(options));
+  ipcMain.handle("space:list-directory", (_event, directoryPath: string) => listDirectoryWithSystemIcons(directoryPath));
+  ipcMain.handle("space:search-files", (_event, options: SearchOptions) => searchFilesWithSystemIcons(options));
   ipcMain.handle("space:suggest-paths", (_event, request: PathSuggestionRequest) => suggestPaths(request));
   ipcMain.handle("space:create-folder", (_event, request: CreateItemRequest) => createFolder(request));
   ipcMain.handle("space:create-file", (_event, request: CreateItemRequest) => createFile(request));

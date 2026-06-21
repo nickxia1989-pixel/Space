@@ -2425,6 +2425,10 @@ export default function App() {
               onSvnCommit={() => void perform("SVN Commit", () => api.runSvnCommand({ path: pane.path, command: "commit" }), [pane.id])}
               onOpenDirectory={() => void perform("Open Folder", () => api.openPath(pane.path), [])}
               onAddressChange={(value) => void updateAddressDraft(pane.id, value)}
+              onAddressCancel={() => {
+                clearAddressSuggestions(pane.id);
+                updatePane(pane.id, (current) => ({ ...current, addressDraft: current.path }));
+              }}
               onAddressSubmit={() => {
                 clearAddressSuggestions(pane.id);
                 void loadPane(pane.id, pane.addressDraft);
@@ -3121,9 +3125,22 @@ function FileIcon({
   entry,
   size = 16
 }: {
-  entry: Pick<FileEntry, "isDirectory" | "name" | "extension"> & Partial<Pick<FileEntry, "isSymlink">>;
+  entry: Pick<FileEntry, "isDirectory" | "name" | "extension"> & Partial<Pick<FileEntry, "isSymlink" | "systemIconDataUrl">>;
   size?: number;
 }) {
+  if (entry.systemIconDataUrl) {
+    return (
+      <img
+        className="system-file-icon"
+        src={entry.systemIconDataUrl}
+        alt=""
+        aria-hidden="true"
+        width={size}
+        height={size}
+        draggable={false}
+      />
+    );
+  }
   if (entry.isDirectory) return <Folder className="file-glyph folder" size={size} />;
   if (entry.isSymlink) return <ExternalLink className="file-glyph shortcut" size={size} />;
   const name = entry.name.toLowerCase();
@@ -3204,6 +3221,7 @@ function ExplorerPane({
   onSvnCommit,
   onOpenDirectory,
   onAddressChange,
+  onAddressCancel,
   onAddressSubmit,
   onFilterChange,
   onRecursiveChange,
@@ -3236,6 +3254,7 @@ function ExplorerPane({
   onSvnCommit: () => void;
   onOpenDirectory: () => void;
   onAddressChange: (value: string) => void;
+  onAddressCancel: () => void;
   onAddressSubmit: () => void;
   onFilterChange: (value: string) => void;
   onRecursiveChange: (value: boolean) => void;
@@ -3259,11 +3278,32 @@ function ExplorerPane({
     .filter((entry) => containsPath(pane.selectedPaths, entry.path))
     .reduce((sum, entry) => sum + entry.size, 0);
   const pathBreadcrumbs = breadcrumbs(pane.path);
-  const [pathMenuOpen, setPathMenuOpen] = useState(false);
+  const [addressEditing, setAddressEditing] = useState(false);
+  const addressInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setPathMenuOpen(false);
+    setAddressEditing(false);
   }, [pane.path]);
+
+  useEffect(() => {
+    if (!addressEditing) return;
+    const frame = window.requestAnimationFrame(() => {
+      addressInputRef.current?.focus();
+      addressInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [addressEditing]);
+
+  function beginAddressEditing() {
+    onActivate();
+    if (pane.addressDraft !== pane.path) onAddressChange(pane.path);
+    setAddressEditing(true);
+  }
+
+  function cancelAddressEditing() {
+    setAddressEditing(false);
+    onAddressCancel();
+  }
 
   return (
     <article
@@ -3308,78 +3348,81 @@ function ExplorerPane({
           <IconButton title="刷新窗格" icon={RefreshCcw} onClick={onRefresh} />
         </div>
 
-        <div
-          className="pane-location"
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) setPathMenuOpen(false);
-          }}
-        >
-          <div className="path-menu">
-            <button
-              type="button"
-              className="path-menu-trigger"
-              title="打开路径层级"
-              aria-label={`P${pane.id} 路径层级`}
-              aria-expanded={pathMenuOpen}
-              onClick={(event) => {
-                event.stopPropagation();
-                setPathMenuOpen((open) => !open);
+        <div className="pane-location">
+          {addressEditing ? (
+            <form
+              className="address-row"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) cancelAddressEditing();
+              }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                onAddressSubmit();
               }}
             >
-              <Folder size={14} />
-              <span>路径</span>
-            </button>
-            {pathMenuOpen && (
-              <div className="path-menu-list" role="menu" aria-label={`P${pane.id} 路径层级`}>
-                {pathBreadcrumbs.map((part, index) => {
-                  const current = index === pathBreadcrumbs.length - 1;
-                  return (
+              <input
+                ref={addressInputRef}
+                aria-label={`P${pane.id} 地址`}
+                value={pane.addressDraft}
+                list={`path-suggestions-${pane.id}`}
+                onChange={(event) => onAddressChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelAddressEditing();
+                  }
+                }}
+                spellCheck={false}
+              />
+              <datalist id={`path-suggestions-${pane.id}`}>
+                {addressSuggestions.map((suggestion) => (
+                  <option key={suggestion.path} value={suggestion.path}>
+                    {suggestion.isDirectory ? "文件夹" : "文件"} - {suggestion.label}
+                  </option>
+                ))}
+              </datalist>
+              <button type="submit" title="转到" aria-label="转到">
+                <ArrowRight size={14} />
+              </button>
+            </form>
+          ) : (
+            <div className="breadcrumb-address" aria-label={`P${pane.id} 当前路径`} title={pane.path}>
+              <div className="breadcrumb-parts">
+                {pathBreadcrumbs.map((part, index) => (
+                  <Fragment key={`${part.path}-${index}`}>
+                    {index > 0 && (
+                      <span className="breadcrumb-separator" aria-hidden="true">
+                        &gt;
+                      </span>
+                    )}
                     <button
-                      key={`${part.path}-${index}`}
                       type="button"
-                      role="menuitem"
-                      className={current ? "active" : ""}
+                      className="breadcrumb-button"
                       title={part.path}
                       onClick={(event) => {
                         event.stopPropagation();
-                        setPathMenuOpen(false);
                         onNavigate(part.path);
                       }}
                     >
-                      <span>{part.label}</span>
-                      <small>{part.path}</small>
+                      {part.label}
                     </button>
-                  );
-                })}
+                  </Fragment>
+                ))}
               </div>
-            )}
-          </div>
-
-          <form
-            className="address-row"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onAddressSubmit();
-            }}
-          >
-            <input
-              aria-label={`P${pane.id} 地址`}
-              value={pane.addressDraft}
-              list={`path-suggestions-${pane.id}`}
-              onChange={(event) => onAddressChange(event.target.value)}
-              spellCheck={false}
-            />
-            <datalist id={`path-suggestions-${pane.id}`}>
-              {addressSuggestions.map((suggestion) => (
-                <option key={suggestion.path} value={suggestion.path}>
-                  {suggestion.isDirectory ? "文件夹" : "文件"} - {suggestion.label}
-                </option>
-              ))}
-            </datalist>
-            <button type="submit" title="转到" aria-label="转到">
-              <ArrowRight size={14} />
-            </button>
-          </form>
+              <button
+                type="button"
+                className="breadcrumb-edit-target"
+                title="编辑路径"
+                aria-label={`P${pane.id} 编辑地址`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  beginAddressEditing();
+                }}
+              >
+                <Pencil size={13} />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
